@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "plugins": [
+            {
+                "name": "typescript-deno-plugin",
+                "enable": true,
+                "importmap": "import_map.json"
+            }
+        ],
+        "target": "ES2020",
+        "lib": "ES2020"
+    },
+}

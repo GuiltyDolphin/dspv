@@ -1,0 +1,19 @@
+#+TITLE: Changelog
+#+OPTIONS: H:10
+#+OPTIONS: num:nil
+#+OPTIONS: toc:2
+
+* Unreleased
+
+** Added
+
+- files
+  - =CHANGELOG.org=
+  - =.gitignore=
+  - =LICENSE=
+  - =Makefile=
+  - =README.org=
+  - =tsconfig.json=
+- Make recipes
+  - =setup_emacs_dev=
+  - =test=
