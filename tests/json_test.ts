@@ -68,6 +68,38 @@ Deno.test("parseAs, null, not null", () => {
     assertThrows(() => parseAs("true", null), Error);
 });
 
+Deno.test("parseAs, object, empty object", () => {
+    assertEquals(parseAs("{}", Object), {});
+});
+
+Deno.test("parseAs, object, singleton number object", () => {
+    assertEquals(parseAs(`{"k": 1}`, Object), { k: 1 });
+});
+
+Deno.test("parseAs, object, mixed element object", () => {
+    assertEquals(parseAs(`{"k1": 1, "k2": true, "k3": {"k31": [7]}, "k4": \"test\"}`, Object), { k1: 1, k2: true, k3: { k31: [7] }, k4: "test" });
+});
+
+Deno.test("parseAs, object, not an object (an array)", () => {
+    assertThrows(() => parseAs("[]", Object), Error);
+});
+
+Deno.test("parseAs, object of booleans, empty object", () => {
+    assertEquals(parseAs("{}", [Object, Boolean]), {});
+});
+
+Deno.test("parseAs, object of booleans, singleton boolean object", () => {
+    assertEquals(parseAs(`{"k": true}`, [Object, Boolean]), { k: true });
+});
+
+Deno.test("parseAs, object of booleans, not an object (an array)", () => {
+    assertThrows(() => parseAs("[]", [Object, Boolean]), Error);
+});
+
+Deno.test("parseAs, object of booleans, object of numbers", () => {
+    assertThrows(() => parseAs(`{"k": 1}`, [Object, Boolean]), Error);
+});
+
 Deno.test("parseAs, string, empty string", () => {
     assertEquals(parseAs("\"\"", String), "");
 });

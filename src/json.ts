@@ -164,12 +164,14 @@ interface Constructor {
 export const AnyTy = Symbol("AnyTy");
 type AnyTyTy = typeof AnyTy;
 
-type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | AnyTyTy
+type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
 function loadAs(jv: JsonValue, cls: PTy): any {
     if (cls === AnyTy) {
         if (jv instanceof JsonArray) {
             return loadAs(jv, [Array, AnyTy]);
+        } else if (jv instanceof JsonObject) {
+            return loadAs(jv, [Object, AnyTy]);
         } else {
             return jv.unwrap();
         }
@@ -181,6 +183,17 @@ function loadAs(jv: JsonValue, cls: PTy): any {
                 return arr.map(x => loadAs(x, cls[1]));
             }
             throw new Error("expected an array but got a different value");
+        }
+        if (cls[0] === Object) {
+            if (jv instanceof JsonObject) {
+                const o = (jv as JsonObject).unwrap();
+                const res: any = new Object();
+                for (const [k, _] of o) {
+                    res[k] = loadAs(o.get(k) as JsonValue, cls[1]);
+                };
+                return res;
+            }
+            throw new Error("expected an object but got a different value");
         }
     }
     if (cls === Boolean) {
@@ -217,10 +230,15 @@ export function parseAs(text: string, cls: NumberConstructor): Number;
 export function parseAs(text: string, cls: StringConstructor): String;
 export function parseAs(text: string, cls: ArrayConstructor): Array<unknown>;
 export function parseAs(text: string, cls: [ArrayConstructor, PTy]): Array<unknown>;
+export function parseAs(text: string, cls: ObjectConstructor): Object;
+export function parseAs(text: string, cls: [ObjectConstructor, PTy]): Object;
 export function parseAs(text: string, cls: null): null;
 export function parseAs(text: string, cls: PTy) {
     if (cls === Array) {
         return parseAs(text, [Array, AnyTy]);
+    }
+    if (cls === Object) {
+        return parseAs(text, [Object, AnyTy]);
     }
     return loadAs(parse(text).either(l => { throw l }, r => r), cls);
 }
