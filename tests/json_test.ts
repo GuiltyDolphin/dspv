@@ -24,6 +24,10 @@ Deno.test("parseAs, array, not an array (an object)", () => {
     assertThrows(() => parseAs("{}", Array), Error);
 });
 
+Deno.test("parseAs, array of arrays, singleton number nested array", () => {
+    assertEquals(parseAs("[[1]]", [Array, Array]), [[1]]);
+});
+
 Deno.test("parseAs, array of booleans, empty array", () => {
     assertEquals(parseAs("[]", [Array, Boolean]), []);
 });
@@ -82,6 +86,10 @@ Deno.test("parseAs, object, mixed element object", () => {
 
 Deno.test("parseAs, object, not an object (an array)", () => {
     assertThrows(() => parseAs("[]", Object), Error);
+});
+
+Deno.test("parseAs, object of objects, singleton number nested object", () => {
+    assertEquals(parseAs(`{"k": {"k2": 1}}`, [Object, Object]), { k: { k2: 1 } });
 });
 
 Deno.test("parseAs, object of booleans, empty object", () => {

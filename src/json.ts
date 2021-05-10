@@ -167,6 +167,12 @@ type AnyTyTy = typeof AnyTy;
 type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
 function loadAs(jv: JsonValue, cls: PTy): any {
+    if (cls === Array) {
+        return loadAs(jv, [Array, AnyTy]);
+    }
+    if (cls === Object) {
+        return loadAs(jv, [Object, AnyTy]);
+    }
     if (cls === AnyTy) {
         if (jv instanceof JsonArray) {
             return loadAs(jv, [Array, AnyTy]);
@@ -234,11 +240,5 @@ export function parseAs(text: string, cls: ObjectConstructor): Object;
 export function parseAs(text: string, cls: [ObjectConstructor, PTy]): Object;
 export function parseAs(text: string, cls: null): null;
 export function parseAs(text: string, cls: PTy) {
-    if (cls === Array) {
-        return parseAs(text, [Array, AnyTy]);
-    }
-    if (cls === Object) {
-        return parseAs(text, [Object, AnyTy]);
-    }
     return loadAs(parse(text).either(l => { throw l }, r => r), cls);
 }
