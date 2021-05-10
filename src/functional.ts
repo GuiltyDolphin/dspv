@@ -92,6 +92,14 @@ export class Either<L, R> implements Functor<R> {
         return this.mapBoth(x => x, r => f(r));
     }
 
+    static joinLeft<L1, L2, R>(v: Either<L1, Either<L2, R>>): Either<L1 | L2, R> {
+        return v.either(l => Either.left<L1 | L2, R>(l), r => r.either(l => Either.left(l), r => Either.right(r)));
+    }
+
+    mapCollecting<L2, R2>(f: (x: R) => Either<L2, R2>): Either<L | L2, R2> {
+        return Either.joinLeft(this.map(f));
+    }
+
     either<T>(onLeft: (l: L) => T, onRight: (r: R) => T): T {
         if (this.isLeft()) {
             return onLeft(this.unwrapLeft());
@@ -146,5 +154,17 @@ export class Either<L, R> implements Functor<R> {
 
     static unEither<L>(v: Either<L, L>): L {
         return v.either(x => x, x => x);
+    }
+
+    static catEithers<L, R>(es: Either<L, R>[]): Either<L, R[]> {
+        const res: R[] = [];
+        for (var i = 0; i < es.length; i++) {
+            if (es[i].isLeft()) {
+                return es[i].propLeft();
+            } else {
+                res[i] = es[i].unwrapRight();
+            }
+        }
+        return Either.right(res);
     }
 }

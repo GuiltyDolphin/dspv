@@ -4,8 +4,9 @@ import {
 } from './deps.ts';
 
 import {
-    parseAs,
-    AnyTy
+    AnyTy,
+    JsonSchema,
+    parseAs
 } from '../mod.ts';
 
 Deno.test("parseAs, array, empty array", () => {
@@ -146,4 +147,34 @@ Deno.test("parseAs, AnyTy, number", () => {
 
 Deno.test("parseAs, AnyTy, boolean", () => {
     assertEquals(parseAs("true", AnyTy), true);
+});
+
+class Basic {
+    p: boolean;
+
+    constructor(p: boolean) {
+        this.p = p;
+    }
+}
+
+const basicSchema = JsonSchema.objectSchema('Basic', {
+    'p': Boolean
+}, (o) => {
+    return new Basic(o.get('p'));
+});
+
+Deno.test("parseAs, with schema, Basic, ok", () => {
+    assertEquals(parseAs(`{"p": true}`, basicSchema), new Basic(true));
+});
+
+Deno.test("parseAs, with schema, Basic, missing key", () => {
+    assertThrows(() => parseAs(`{}`, basicSchema), Error, "missing keys: p");
+});
+
+Deno.test("parseAs, with schema, Basic, extra key", () => {
+    assertThrows(() => parseAs(`{"p": true, "q": 1}`, basicSchema), Error, "unknown keys: q");
+});
+
+Deno.test("parseAs, with schema, Basic, not on an object", () => {
+    assertThrows(() => parseAs('7', basicSchema), Error);
 });
