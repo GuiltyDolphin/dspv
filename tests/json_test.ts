@@ -4,8 +4,41 @@ import {
 } from './deps.ts';
 
 import {
-    parseAs
+    parseAs,
+    AnyTy
 } from '../mod.ts';
+
+Deno.test("parseAs, array, empty array", () => {
+    assertEquals(parseAs("[]", Array), []);
+});
+
+Deno.test("parseAs, array, singleton number array", () => {
+    assertEquals(parseAs("[1]", Array), [1]);
+});
+
+Deno.test("parseAs, array, mixed element array", () => {
+    assertEquals(parseAs("[1, true, [5], \"test\"]", Array), [1, true, [5], "test"]);
+});
+
+Deno.test("parseAs, array, not an array (an object)", () => {
+    assertThrows(() => parseAs("{}", Array), Error);
+});
+
+Deno.test("parseAs, array of booleans, empty array", () => {
+    assertEquals(parseAs("[]", [Array, Boolean]), []);
+});
+
+Deno.test("parseAs, array of booleans, singleton boolean array", () => {
+    assertEquals(parseAs("[true]", [Array, Boolean]), [true]);
+});
+
+Deno.test("parseAs, array of booleans, not an array (an object)", () => {
+    assertThrows(() => parseAs("{}", [Array, Boolean]), Error);
+});
+
+Deno.test("parseAs, array of booleans, array of numbers", () => {
+    assertThrows(() => parseAs("[1]", [Array, Boolean]), Error);
+});
 
 Deno.test("parseAs, boolean, true", () => {
     assertEquals(parseAs("true", Boolean), true);
@@ -57,4 +90,20 @@ Deno.test("parseAs, string, a string", () => {
 
 Deno.test("parseAs, string, not a string", () => {
     assertThrows(() => parseAs("true", String), Error);
+});
+
+Deno.test("parseAs, AnyTy, empty array", () => {
+    assertEquals(parseAs("[]", AnyTy), []);
+});
+
+Deno.test("parseAs, AnyTy, singleton number array", () => {
+    assertEquals(parseAs("[1]", AnyTy), [1]);
+});
+
+Deno.test("parseAs, AnyTy, number", () => {
+    assertEquals(parseAs("1", AnyTy), 1);
+});
+
+Deno.test("parseAs, AnyTy, boolean", () => {
+    assertEquals(parseAs("true", AnyTy), true);
 });

@@ -160,7 +160,29 @@ interface Constructor {
     new(...args: any[]): any;
 }
 
-function loadAs(jv: JsonValue, cls: Constructor | null): any {
+/** Represents values that can take any type. */
+export const AnyTy = Symbol("AnyTy");
+type AnyTyTy = typeof AnyTy;
+
+type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | AnyTyTy
+
+function loadAs(jv: JsonValue, cls: PTy): any {
+    if (cls === AnyTy) {
+        if (jv instanceof JsonArray) {
+            return loadAs(jv, [Array, AnyTy]);
+        } else {
+            return jv.unwrap();
+        }
+    }
+    if (cls instanceof Array) {
+        if (cls[0] === Array) {
+            if (jv instanceof JsonArray) {
+                const arr: Array<JsonValue> = jv.unwrap();
+                return arr.map(x => loadAs(x, cls[1]));
+            }
+            throw new Error("expected an array but got a different value");
+        }
+    }
     if (cls === Boolean) {
         if (jv instanceof JsonBoolean) {
             return jv.unwrap();
@@ -189,10 +211,16 @@ function loadAs(jv: JsonValue, cls: Constructor | null): any {
 }
 
 /** Parse the JSON text as a member of the given type. */
+export function parseAs(text: string, cls: AnyTyTy): any;
 export function parseAs(text: string, cls: BooleanConstructor): Boolean;
 export function parseAs(text: string, cls: NumberConstructor): Number;
 export function parseAs(text: string, cls: StringConstructor): String;
+export function parseAs(text: string, cls: ArrayConstructor): Array<unknown>;
+export function parseAs(text: string, cls: [ArrayConstructor, PTy]): Array<unknown>;
 export function parseAs(text: string, cls: null): null;
-export function parseAs(text: string, cls: Constructor | null) {
+export function parseAs(text: string, cls: PTy) {
+    if (cls === Array) {
+        return parseAs(text, [Array, AnyTy]);
+    }
     return loadAs(parse(text).either(l => { throw l }, r => r), cls);
 }
