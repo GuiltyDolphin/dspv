@@ -5,6 +5,11 @@
 
 * Unreleased
 
+** Added
+
+- =parseAs= function for specifying which type to parse JSON
+  text into
+
 * 0.0.0 - 2021-05-09
 
 ** Added
