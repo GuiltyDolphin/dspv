@@ -9,7 +9,12 @@ enum JsonType {
     STRING = "STRING"
 }
 
-abstract class JsonValue {
+/** Types that are directly JSON compatible. */
+type JsonCompatTy = JsonCompatTy[] | boolean | null | number | { [k: string]: JsonCompatTy } | string;
+
+type JsonJSType<T> = JsonJSType<T>[] | JsonCompatTy | { [k: string]: JsonJSType<T> } | T;
+
+abstract class GenJsonValue<T extends JsonCompatTy> {
     protected value: any;
     protected ty: JsonType;
 
@@ -22,12 +27,14 @@ abstract class JsonValue {
         return this.ty;
     }
 
-    _unwrap(): any {
+    _unwrap(): T {
         return this.value;
     }
 }
 
-class JsonArray extends JsonValue {
+type JsonValue = GenJsonValue<JsonCompatTy>;
+
+class JsonArray extends GenJsonValue<JsonCompatTy[]> {
     arr: JsonValue[];
 
     constructor(...x: JsonValue[]) {
@@ -53,17 +60,17 @@ class JsonArray extends JsonValue {
     }
 }
 
-class JsonBoolean extends JsonValue {
+class JsonBoolean extends GenJsonValue<boolean> {
     constructor(x: boolean) {
         super(x, JsonType.BOOLEAN);
     }
 
-    unwrap(): Boolean {
+    unwrap(): boolean {
         return this.value;
     }
 }
 
-class JsonNull extends JsonValue {
+class JsonNull extends GenJsonValue<null> {
     constructor() {
         super(null, JsonType.NULL);
     }
@@ -73,7 +80,7 @@ class JsonNull extends JsonValue {
     }
 }
 
-class JsonNumber extends JsonValue {
+class JsonNumber extends GenJsonValue<number> {
     constructor(x: number) {
         super(x, JsonType.NUMBER);
     }
@@ -83,7 +90,7 @@ class JsonNumber extends JsonValue {
     }
 }
 
-class JsonObject extends JsonValue {
+class JsonObject extends GenJsonValue<{ [k: string]: JsonCompatTy }> {
     private map: Map<string, JsonValue>;
 
     constructor() {
@@ -117,7 +124,7 @@ class JsonObject extends JsonValue {
     }
 }
 
-class JsonString extends JsonValue {
+class JsonString extends GenJsonValue<string> {
     constructor(x: string) {
         super(x, JsonType.STRING);
     }
@@ -273,13 +280,13 @@ export class JsonParser {
      * Similar to {@link parseAs}, but throw any resulting exception immediately.
      */
     parseAsOrThrow(text: string, cls: AnyTyTy): any;
-    parseAsOrThrow(text: string, cls: BooleanConstructor): Boolean;
-    parseAsOrThrow(text: string, cls: NumberConstructor): Number;
-    parseAsOrThrow(text: string, cls: StringConstructor): String;
-    parseAsOrThrow(text: string, cls: ArrayConstructor): Array<unknown>;
-    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): Array<unknown>;
-    parseAsOrThrow(text: string, cls: ObjectConstructor): Object;
-    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): Object;
+    parseAsOrThrow(text: string, cls: BooleanConstructor): boolean;
+    parseAsOrThrow(text: string, cls: NumberConstructor): number;
+    parseAsOrThrow(text: string, cls: StringConstructor): string;
+    parseAsOrThrow(text: string, cls: ArrayConstructor): JsonCompatTy[];
+    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): JsonCompatTy[];
+    parseAsOrThrow(text: string, cls: ObjectConstructor): StringKeyed<JsonCompatTy>;
+    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): StringKeyed<JsonCompatTy>;
     parseAsOrThrow(text: string, cls: null): null;
     parseAsOrThrow<T>(text: string, cls: GenConstructor<T>): T;
     parseAsOrThrow<T>(text: string, cls: PTy | GenConstructor<T>) {
@@ -288,13 +295,13 @@ export class JsonParser {
 
     /** Parse the JSON text as a member of the given type. */
     parseAs(text: string, cls: AnyTyTy): JsonParseResult<any>;
-    parseAs(text: string, cls: BooleanConstructor): JsonParseResult<Boolean>;
-    parseAs(text: string, cls: NumberConstructor): JsonParseResult<Number>;
-    parseAs(text: string, cls: StringConstructor): JsonParseResult<String>;
-    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<Array<unknown>>;
-    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<Array<unknown>>;
-    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<Object>;
-    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<Object>;
+    parseAs(text: string, cls: BooleanConstructor): JsonParseResult<boolean>;
+    parseAs(text: string, cls: NumberConstructor): JsonParseResult<number>;
+    parseAs(text: string, cls: StringConstructor): JsonParseResult<string>;
+    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<JsonCompatTy[]>;
+    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<JsonCompatTy[]>;
+    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<StringKeyed<JsonCompatTy>>;
+    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<StringKeyed<JsonCompatTy>>;
     parseAs(text: string, cls: null): JsonParseResult<null>;
     parseAs<T>(text: string, cls: GenConstructor<T>): JsonParseResult<T>;
     parseAs<T>(text: string, cls: PTy | GenConstructor<T>) {
@@ -419,8 +426,6 @@ interface GenConstructor<T> {
 /** Represents values that can take any type. */
 export const AnyTy = Symbol("AnyTy");
 type AnyTyTy = typeof AnyTy;
-
-type JsonJSType<T> = JsonJSType<T>[] | Boolean | null | Number | String | T;
 
 type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
