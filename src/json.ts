@@ -187,31 +187,24 @@ export class JsonParser {
 
     private schemas: Schemas;
 
-    constructor(schemas?: Schemas) {
-        if (schemas === undefined) {
-            schemas = new Map();
-        }
+    constructor(schemas?: Schemas, noDefault?: boolean) {
+        schemas = new Map([...(noDefault ? [] : defaultSchema), ...(schemas !== undefined ? schemas : [])]);
         this.schemas = schemas;
     }
 
     /** Parse the JSON text as a member of the given type. */
     loadAs<T>(jv: JsonValue, cls: PTy): JsonParseResult<JsonJSType<T>> {
         const typeError: (d: string) => JsonParseResult<JsonJSType<T>> = (desc: string) => {
-            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, jv._unwrap()));
+            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv._unwrap()));
         };
 
         if (this.schemas.get(cls) !== undefined) {
-            const schema = this.schemas.get(cls) as JsonSchema<T>;
-            if (jv instanceof JsonObject) {
-                return schema.onObject(this, jv);
+            const schema = this.schemas.get(cls);
+            if (schema instanceof JsonSchema) {
+                return (schema as JsonSchema<T>).on(this, jv);
+            } else {
+                return this.loadAs(jv, schema as PTy);
             }
-            return typeError(schema.getDescription());
-        }
-        if (cls === Array) {
-            return this.loadAs(jv, [Array, AnyTy]);
-        }
-        if (cls === Object) {
-            return this.loadAs(jv, [Object, AnyTy]);
         }
         if (cls === AnyTy) {
             if (jv instanceof JsonArray) {
@@ -246,30 +239,6 @@ export class JsonParser {
                 }
                 return typeError('object');
             }
-        }
-        if (cls === Boolean) {
-            if (jv instanceof JsonBoolean) {
-                return JsonParser.parseOk(jv.unwrap());
-            }
-            return typeError('boolean');
-        }
-        if (cls === null) {
-            if (jv instanceof JsonNull) {
-                return JsonParser.parseOk(jv.unwrap());
-            }
-            return typeError('null');
-        }
-        if (cls === Number) {
-            if (jv instanceof JsonNumber) {
-                return JsonParser.parseOk(jv.unwrap());
-            }
-            return typeError('number');
-        }
-        if (cls === String) {
-            if (jv instanceof JsonString) {
-                return JsonParser.parseOk(jv.unwrap());
-            }
-            return typeError('string');
         }
         throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
     }
@@ -324,11 +293,13 @@ export class JsonParser {
 
     static JsonTypeError = class extends JsonParseError {
         private expected: string;
+        private actualTy: string;
         private value: any;
 
-        constructor(expected: string, value: any) {
-            super(`expected: ${expected}\nbut got: ${String(value)}`);
+        constructor(expected: string, actualTy: string, value: any) {
+            super(`expected: ${expected}\nbut got: ${actualTy}: ${String(value)}`);
             this.expected = expected;
+            this.actualTy = actualTy;
             this.value = value;
         }
     }
@@ -354,14 +325,60 @@ export class JsonParser {
 
 type StringKeyed<T> = { [k: string]: T };
 
+type JParser<T> = {
+    onArray: (parser: JsonParser, json: JsonArray) => JsonParseResult<T>,
+    onBoolean: (parser: JsonParser, json: JsonBoolean) => JsonParseResult<T>,
+    onNull: (parser: JsonParser, json: JsonNull) => JsonParseResult<T>,
+    onNumber: (parser: JsonParser, json: JsonNumber) => JsonParseResult<T>,
+    onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T>
+    onString: (parser: JsonParser, json: JsonString) => JsonParseResult<T>
+};
+
 /** Schema that specifies how to load a specific class from JSON. */
 export class JsonSchema<T> {
-    private objectParser: { onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T> };
+    private objectParser: JParser<T>;
     private description: string;
 
-    constructor(description: string, objectParser: { onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T> }) {
-        this.objectParser = objectParser;
+    constructor(description: string, objectParser: Partial<JParser<T>>) {
+        const failWith: <O extends GenJsonValue<JsonCompatTy>>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends GenJsonValue<JsonCompatTy>>(tyDesc: string) => {
+            return (_parser: JsonParser, o: O) => {
+                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, String(o._unwrap())));
+            };
+        };
+        this.objectParser = {
+            onArray: failWith('array'),
+            onBoolean: failWith('boolean'),
+            onObject: failWith('object'),
+            onNull: failWith('null'),
+            onNumber: failWith('number'),
+            onString: failWith('string'),
+            ...objectParser
+        };
         this.description = description;
+    }
+
+    static booleanSchema<T>(desc: string, onRes: (x: boolean) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onBoolean(_parser: JsonParser, json: JsonBoolean): JsonParseResult<T> {
+                return JsonParser.parseOk(onRes(json.unwrap()));
+            }
+        });
+    }
+
+    static nullSchema<T>(desc: string, onRes: (x: null) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onNull(_parser: JsonParser, json: JsonNull): JsonParseResult<T> {
+                return JsonParser.parseOk(onRes(json.unwrap()));
+            }
+        });
+    }
+
+    static numberSchema<T>(desc: string, onRes: (x: number) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onNumber(_parser: JsonParser, json: JsonNumber): JsonParseResult<T> {
+                return JsonParser.parseOk(onRes(json.unwrap()));
+            }
+        });
     }
 
     static objectSchema<T>(desc: string, ks: StringKeyed<PTy>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
@@ -398,13 +415,39 @@ export class JsonSchema<T> {
         });
     }
 
+    static stringSchema<T>(desc: string, onRes: (x: string) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onString(_parser: JsonParser, json: JsonString): JsonParseResult<T> {
+                return JsonParser.parseOk(onRes(json.unwrap()));
+            }
+        });
+    }
+
     /** Get a human-readable description of what the schema parses. */
     getDescription() {
         return this.description;
     };
 
-    onObject(parser: JsonParser, o: JsonObject): JsonParseResult<T> {
-        return this.objectParser.onObject(parser, o);
+    on(parser: JsonParser, o: JsonValue): JsonParseResult<T> {
+        if (o instanceof JsonArray) {
+            return this.objectParser.onArray(parser, o);
+        }
+        if (o instanceof JsonBoolean) {
+            return this.objectParser.onBoolean(parser, o);
+        }
+        if (o instanceof JsonNull) {
+            return this.objectParser.onNull(parser, o);
+        }
+        if (o instanceof JsonNumber) {
+            return this.objectParser.onNumber(parser, o);
+        }
+        if (o instanceof JsonObject) {
+            return this.objectParser.onObject(parser, o);
+        }
+        if (o instanceof JsonString) {
+            return this.objectParser.onString(parser, o);
+        }
+        throw new Error("fatal: unknown class representing a JSON value: " + String(o.constructor));
     }
 }
 
@@ -429,4 +472,12 @@ type AnyTyTy = typeof AnyTy;
 
 type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
-type Schemas = Map<PTy, JsonSchema<any>>;
+type Schemas = Map<PTy, JsonSchema<any> | PTy>;
+
+const defaultSchema: Schemas = new Map<PTy, JsonSchema<any> | PTy>()
+    .set(Array, [Array, AnyTy])
+    .set(Boolean, JsonSchema.booleanSchema('boolean', x => x))
+    .set(null, JsonSchema.nullSchema('null', x => x))
+    .set(Number, JsonSchema.numberSchema('number', x => x))
+    .set(Object, [Object, AnyTy])
+    .set(String, JsonSchema.stringSchema('string', x => x));

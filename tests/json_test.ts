@@ -246,25 +246,25 @@ function assertParseFailsWithClass(actual: JsonParseResult<any>, expectedClass: 
 
 function assertParseFailsWith(actual: JsonParseResult<any>, expected: Error): void {
     assertParseFailsWithClass(actual, expected.constructor);
-    assertEquals(actual.unwrapLeft(), expected);
+    assertEquals(actual.unwrapLeft().message, expected.message);
 }
 
 Deno.test("errors, type error, expected boolean but got number, correct error", () => {
-    assertParseFailsWith(basicParser.parseAs('1', Boolean), new JsonParser.JsonTypeError('boolean', 1))
+    assertParseFailsWith(basicParser.parseAs('1', Boolean), new JsonParser.JsonTypeError('boolean', 'number', 1))
 });
 
 class Empty { }
 
 Deno.test("errors, type error, expected Empty but got number, correct error", () => {
     assertParseFailsWith(new JsonParser(new Map().set(Empty, JsonSchema.objectSchema<Empty>('Empty', {
-    }, (_) => new Empty()))).parseAs(`1`, Empty), new JsonParser.JsonTypeError('Empty', 1))
+    }, (_) => new Empty()))).parseAs(`1`, Empty), new JsonParser.JsonTypeError('Empty', 'number', 1))
 });
 
 Deno.test("errors, type error, wrong field type, expected boolean but got number, correct error", () => {
     assertParseFailsWith(basicParser.parseAs(`
 {
   "p": 1
-}`, [Object, Boolean]), new JsonParser.JsonTypeError('boolean', 1))
+}`, [Object, Boolean]), new JsonParser.JsonTypeError('boolean', 'number', 1))
 });
 
 Deno.test("errors, missing keys", () => {
