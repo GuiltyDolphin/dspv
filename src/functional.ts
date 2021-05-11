@@ -158,7 +158,7 @@ export class Either<L, R> implements Functor<R> {
 
     static catEithers<L, R>(es: Either<L, R>[]): Either<L, R[]> {
         const res: R[] = [];
-        for (var i = 0; i < es.length; i++) {
+        for (let i = 0; i < es.length; i++) {
             if (es[i].isLeft()) {
                 return es[i].propLeft();
             } else {

@@ -140,7 +140,7 @@ export function toJsonValue(x: any): Either<string, JsonValue> {
         return pure(new JsonNull());
     } else if (x instanceof Array) {
         const res = new JsonArray();
-        for (var i = 0; i < x.length; i++) {
+        for (let i = 0; i < x.length; i++) {
             const ijson = toJsonValue(x[i]);
             if (ijson.isLeft()) {
                 return ijson.propLeft();
