@@ -9,7 +9,7 @@ enum JsonType {
     STRING = "STRING"
 }
 
-export abstract class JsonValue {
+abstract class JsonValue {
     protected value: any;
     protected ty: JsonType;
 
@@ -27,7 +27,7 @@ export abstract class JsonValue {
     }
 }
 
-export class JsonArray extends JsonValue {
+class JsonArray extends JsonValue {
     arr: JsonValue[];
 
     constructor(...x: JsonValue[]) {
@@ -53,7 +53,7 @@ export class JsonArray extends JsonValue {
     }
 }
 
-export class JsonBoolean extends JsonValue {
+class JsonBoolean extends JsonValue {
     constructor(x: boolean) {
         super(x, JsonType.BOOLEAN);
     }
@@ -63,7 +63,7 @@ export class JsonBoolean extends JsonValue {
     }
 }
 
-export class JsonNull extends JsonValue {
+class JsonNull extends JsonValue {
     constructor() {
         super(null, JsonType.NULL);
     }
@@ -73,7 +73,7 @@ export class JsonNull extends JsonValue {
     }
 }
 
-export class JsonNumber extends JsonValue {
+class JsonNumber extends JsonValue {
     constructor(x: number) {
         super(x, JsonType.NUMBER);
     }
@@ -83,7 +83,7 @@ export class JsonNumber extends JsonValue {
     }
 }
 
-export class JsonObject extends JsonValue {
+class JsonObject extends JsonValue {
     private map: Map<string, JsonValue>;
 
     constructor() {
@@ -117,7 +117,7 @@ export class JsonObject extends JsonValue {
     }
 }
 
-export class JsonString extends JsonValue {
+class JsonString extends JsonValue {
     constructor(x: string) {
         super(x, JsonType.STRING);
     }
