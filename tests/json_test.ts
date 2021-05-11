@@ -157,24 +157,70 @@ class Basic {
     }
 }
 
-const basicSchema = JsonSchema.objectSchema('Basic', {
+const basicSchema = JsonSchema.objectSchema<Basic>('Basic', {
     'p': Boolean
 }, (o) => {
     return new Basic(o.get('p'));
 });
 
+const basicSchemas = new Map();
+
+basicSchemas.set(Basic, basicSchema);
+
 Deno.test("parseAs, with schema, Basic, ok", () => {
-    assertEquals(parseAs(`{"p": true}`, basicSchema), new Basic(true));
+    assertEquals(parseAs(`{"p": true}`, Basic, basicSchemas), new Basic(true));
 });
 
 Deno.test("parseAs, with schema, Basic, missing key", () => {
-    assertThrows(() => parseAs(`{}`, basicSchema), Error, "missing keys: p");
+    assertThrows(() => parseAs(`{}`, Basic, basicSchemas), Error, "missing keys: p");
 });
 
 Deno.test("parseAs, with schema, Basic, extra key", () => {
-    assertThrows(() => parseAs(`{"p": true, "q": 1}`, basicSchema), Error, "unknown keys: q");
+    assertThrows(() => parseAs(`{"p": true, "q": 1}`, Basic, basicSchemas), Error, "unknown keys: q");
 });
 
 Deno.test("parseAs, with schema, Basic, not on an object", () => {
-    assertThrows(() => parseAs('7', basicSchema), Error);
+    assertThrows(() => parseAs('7', Basic, basicSchemas), Error);
+});
+
+class Basic2 {
+    p: Basic;
+
+    constructor(p: Basic) {
+        this.p = p;
+    }
+}
+
+const basic2Schema = JsonSchema.objectSchema<Basic2>('Basic2', {
+    p: Basic,
+}, (o) => { return new Basic2(o.get('p')); });
+
+const basic2SchemaMap = new Map();
+basic2SchemaMap.set(Basic, basicSchema);
+basic2SchemaMap.set(Basic2, basic2Schema);
+
+Deno.test("parseAs, with schema, Basic2, inner item does not match Basic, is empty", () => {
+    assertThrows(() => parseAs(`
+{
+  "p": {
+  }
+}`, Basic2, basic2SchemaMap), Error, "missing keys: p");
+});
+
+Deno.test("parseAs, with schema, Basic2, inner item does not match Basic, wrong type", () => {
+    assertThrows(() => parseAs(`
+{
+  "p": {
+    "p": 1
+  }
+}`, Basic2, basic2SchemaMap), Error, "expected a boolean");
+});
+
+Deno.test("parseAs, with schema, Basic2, ok", () => {
+    assertEquals(parseAs(`
+{
+  "p": {
+    "p": true
+  }
+}`, Basic2, basic2SchemaMap), new Basic2(new Basic(true)))
 });

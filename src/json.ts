@@ -104,6 +104,10 @@ export class JsonObject extends JsonValue {
         return this.map.set(k, v);
     }
 
+    asMap(): Map<string, JsonValue> {
+        return this.map;
+    }
+
     keys(): Set<string> {
         return new Set<string>(this.map.keys());
     }
@@ -186,28 +190,28 @@ export class JsonParser {
 
 /** Schema that specifies how to load a specific class from JSON. */
 export class JsonSchema<T> {
-    private parser: { onObject: (json: JsonObject) => JsonParseResult<T> };
+    private parser: { onObject: (json: JsonObject, schemas: Schemas) => JsonParseResult<T> };
     private description: string;
 
-    constructor(description: string, parser: { onObject: (json: JsonObject) => JsonParseResult<T> }) {
+    constructor(description: string, parser: { onObject: (json: JsonObject, schemas: Schemas) => JsonParseResult<T> }) {
         this.parser = parser;
         this.description = description;
     }
 
     static objectSchema<T>(desc: string, ks: { [k: string]: PTy }, onRes: (x: { [k: string]: any }) => T): JsonSchema<T> {
         return new JsonSchema(desc, new (class {
-            onObject(json: JsonObject): JsonParseResult<T> {
+            onObject(json: JsonObject, schemas: Schemas): JsonParseResult<T> {
                 const unreadKeys = new Set<string>();
                 const missedKeys = new Set<string>();
                 for (const ksk in ks) {
                     missedKeys.add(ksk);
                 }
                 const res = new Map<string, any>();
-                Array.from(json.keys()).map(k => {
+                for (const [k, kv] of json.asMap()) {
                     for (const ksk in ks) {
                         if (ksk == k) {
                             missedKeys.delete(ksk);
-                            const v = loadAs(json.get(k).unwrap(), ks[ksk]);
+                            const v = loadAs(kv, ks[ksk], schemas);
                             if (v.isLeft()) {
                                 return v.propLeft();
                             }
@@ -216,7 +220,7 @@ export class JsonSchema<T> {
                             unreadKeys.add(k);
                         }
                     }
-                });
+                }
                 if (unreadKeys.size > 0) {
                     return JsonParser.failParse('unknown keys: ' + Array.from(unreadKeys.values()).join(', '));
                 }
@@ -233,13 +237,24 @@ export class JsonSchema<T> {
         return this.description;
     };
 
-    onObject(o: JsonObject): JsonParseResult<T> {
-        return this.parser.onObject(o);
+    onObject(o: JsonObject, schemas: Schemas): JsonParseResult<T> {
+        return this.parser.onObject(o, schemas);
     }
 }
 
 interface Constructor {
     new(...args: any[]): any;
+}
+
+/**
+ * Generic constructor.
+ *
+ * Note that this is different from {@link Constructor} in that new on
+ * Boolean does not match GenConstructor<Boolean>, but does match
+ * Constructor.
+ */
+interface GenConstructor<T> {
+    new(...args: any[]): T;
 }
 
 /** Represents values that can take any type. */
@@ -250,19 +265,28 @@ type JsonJSType<T> = JsonJSType<T>[] | Boolean | null | Number | String | T;
 
 type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
+type Schemas = Map<PTy, JsonSchema<any>>;
+
 /** Parse the JSON text as a member of the given type. */
-function loadAs<T>(jv: JsonValue, cls: PTy | JsonSchema<T>): JsonParseResult<JsonJSType<T>> {
+function loadAs<T>(jv: JsonValue, cls: PTy, schemas: Schemas): JsonParseResult<JsonJSType<T>> {
+    if (schemas.get(cls) !== undefined) {
+        const schema = schemas.get(cls) as JsonSchema<T>;
+        if (jv instanceof JsonObject) {
+            return schema.onObject(jv, schemas);
+        }
+        throw new Error(`expected something that matches ${schema.getDescription()} but got ` + String(jv._unwrap()));
+    }
     if (cls === Array) {
-        return loadAs(jv, [Array, AnyTy]);
+        return loadAs(jv, [Array, AnyTy], schemas);
     }
     if (cls === Object) {
-        return loadAs(jv, [Object, AnyTy]);
+        return loadAs(jv, [Object, AnyTy], schemas);
     }
     if (cls === AnyTy) {
         if (jv instanceof JsonArray) {
-            return loadAs(jv, [Array, AnyTy]);
+            return loadAs(jv, [Array, AnyTy], schemas);
         } else if (jv instanceof JsonObject) {
-            return loadAs(jv, [Object, AnyTy]);
+            return loadAs(jv, [Object, AnyTy], schemas);
         } else {
             return JsonParser.parseOk(jv._unwrap());
         }
@@ -271,7 +295,7 @@ function loadAs<T>(jv: JsonValue, cls: PTy | JsonSchema<T>): JsonParseResult<Jso
         if (cls[0] === Array) {
             if (jv instanceof JsonArray) {
                 const arr: Array<JsonValue> = (jv as JsonArray).unwrap();
-                return Either.catEithers(arr.map(x => loadAs(x, cls[1] as PTy)));
+                return Either.catEithers(arr.map(x => loadAs(x, cls[1] as PTy, schemas)));
             }
             throw new Error("expected an array but got a different value");
         }
@@ -280,7 +304,7 @@ function loadAs<T>(jv: JsonValue, cls: PTy | JsonSchema<T>): JsonParseResult<Jso
                 const o = (jv as JsonObject).unwrap();
                 const res: any = new Object();
                 for (const [k, _] of o) {
-                    const r = loadAs(o.get(k) as JsonValue, cls[1]);
+                    const r = loadAs(o.get(k) as JsonValue, cls[1], schemas);
                     if (r.isLeft()) {
                         return r.propLeft();
                     } else {
@@ -316,26 +340,23 @@ function loadAs<T>(jv: JsonValue, cls: PTy | JsonSchema<T>): JsonParseResult<Jso
         }
         throw new Error("expected a string but got a different value");
     }
-    if (cls instanceof JsonSchema) {
-        if (jv instanceof JsonObject) {
-            return cls.onObject(jv);
-        }
-        throw new Error(`expected something that matches ${cls.getDescription()} but got a different value`);
-    }
     throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
 }
 
 /** Parse the JSON text as a member of the given type. */
-export function parseAs(text: string, cls: AnyTyTy): any;
-export function parseAs(text: string, cls: BooleanConstructor): Boolean;
-export function parseAs(text: string, cls: NumberConstructor): Number;
-export function parseAs(text: string, cls: StringConstructor): String;
-export function parseAs(text: string, cls: ArrayConstructor): Array<unknown>;
-export function parseAs(text: string, cls: [ArrayConstructor, PTy]): Array<unknown>;
-export function parseAs(text: string, cls: ObjectConstructor): Object;
-export function parseAs(text: string, cls: [ObjectConstructor, PTy]): Object;
-export function parseAs(text: string, cls: null): null;
-export function parseAs<T>(text: string, cls: JsonSchema<T>): T;
-export function parseAs<T>(text: string, cls: PTy | JsonSchema<T>) {
-    return parse(text).mapCollecting(v => loadAs(v, cls)).either(err => { throw err }, r => r);
+export function parseAs(text: string, cls: AnyTyTy, schemas?: Schemas): any;
+export function parseAs(text: string, cls: BooleanConstructor, schemas?: Schemas): Boolean;
+export function parseAs(text: string, cls: NumberConstructor, schemas?: Schemas): Number;
+export function parseAs(text: string, cls: StringConstructor, schemas?: Schemas): String;
+export function parseAs(text: string, cls: ArrayConstructor, schemas?: Schemas): Array<unknown>;
+export function parseAs(text: string, cls: [ArrayConstructor, PTy], schemas?: Schemas): Array<unknown>;
+export function parseAs(text: string, cls: ObjectConstructor, schemas?: Schemas): Object;
+export function parseAs(text: string, cls: [ObjectConstructor, PTy], schemas?: Schemas): Object;
+export function parseAs(text: string, cls: null, schemas?: Schemas): null;
+export function parseAs<T>(text: string, cls: GenConstructor<T>, schemas?: Schemas): T;
+export function parseAs<T>(text: string, cls: PTy | GenConstructor<T>, schemas?: Schemas) {
+    if (schemas === undefined) {
+        schemas = new Map();
+    }
+    return parse(text).mapCollecting(v => loadAs(v, cls, schemas as Schemas)).either(err => { throw err }, r => r);
 }
