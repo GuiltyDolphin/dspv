@@ -176,23 +176,146 @@ class JsonParseError extends Error {
 
 export type JsonParseResult<T> = Either<JsonParseError, T>;
 
-export module JsonParser {
+export class JsonParser {
 
-    export function failParse<T>(err: JsonParseError): JsonParseResult<T> {
+    private schemas: Schemas;
+
+    constructor(schemas?: Schemas) {
+        if (schemas === undefined) {
+            schemas = new Map();
+        }
+        this.schemas = schemas;
+    }
+
+    /** Parse the JSON text as a member of the given type. */
+    loadAs<T>(jv: JsonValue, cls: PTy): JsonParseResult<JsonJSType<T>> {
+        const typeError: (d: string) => JsonParseResult<JsonJSType<T>> = (desc: string) => {
+            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, jv._unwrap()));
+        };
+
+        if (this.schemas.get(cls) !== undefined) {
+            const schema = this.schemas.get(cls) as JsonSchema<T>;
+            if (jv instanceof JsonObject) {
+                return schema.onObject(this, jv);
+            }
+            return typeError(schema.getDescription());
+        }
+        if (cls === Array) {
+            return this.loadAs(jv, [Array, AnyTy]);
+        }
+        if (cls === Object) {
+            return this.loadAs(jv, [Object, AnyTy]);
+        }
+        if (cls === AnyTy) {
+            if (jv instanceof JsonArray) {
+                return this.loadAs(jv, [Array, AnyTy]);
+            } else if (jv instanceof JsonObject) {
+                return this.loadAs(jv, [Object, AnyTy]);
+            } else {
+                return JsonParser.parseOk(jv._unwrap());
+            }
+        }
+        if (cls instanceof Array) {
+            if (cls[0] === Array) {
+                if (jv instanceof JsonArray) {
+                    const arr: Array<JsonValue> = (jv as JsonArray).unwrap();
+                    return Either.catEithers(arr.map(x => this.loadAs(x, cls[1] as PTy)));
+                }
+                return typeError('array');
+            }
+            if (cls[0] === Object) {
+                if (jv instanceof JsonObject) {
+                    const o = (jv as JsonObject).unwrap();
+                    const res: any = new Object();
+                    for (const [k, _] of o) {
+                        const r = this.loadAs(o.get(k) as JsonValue, cls[1]);
+                        if (r.isLeft()) {
+                            return r.propLeft();
+                        } else {
+                            res[k] = r.unwrapRight();
+                        }
+                    };
+                    return JsonParser.parseOk(res);
+                }
+                return typeError('object');
+            }
+        }
+        if (cls === Boolean) {
+            if (jv instanceof JsonBoolean) {
+                return JsonParser.parseOk(jv.unwrap());
+            }
+            return typeError('boolean');
+        }
+        if (cls === null) {
+            if (jv instanceof JsonNull) {
+                return JsonParser.parseOk(jv.unwrap());
+            }
+            return typeError('null');
+        }
+        if (cls === Number) {
+            if (jv instanceof JsonNumber) {
+                return JsonParser.parseOk(jv.unwrap());
+            }
+            return typeError('number');
+        }
+        if (cls === String) {
+            if (jv instanceof JsonString) {
+                return JsonParser.parseOk(jv.unwrap());
+            }
+            return typeError('string');
+        }
+        throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
+    }
+
+    /**
+     * Parse the JSON text as a member of the given type.
+     *
+     * Similar to {@link parseAs}, but throw any resulting exception immediately.
+     */
+    parseAsOrThrow(text: string, cls: AnyTyTy): any;
+    parseAsOrThrow(text: string, cls: BooleanConstructor): Boolean;
+    parseAsOrThrow(text: string, cls: NumberConstructor): Number;
+    parseAsOrThrow(text: string, cls: StringConstructor): String;
+    parseAsOrThrow(text: string, cls: ArrayConstructor): Array<unknown>;
+    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): Array<unknown>;
+    parseAsOrThrow(text: string, cls: ObjectConstructor): Object;
+    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): Object;
+    parseAsOrThrow(text: string, cls: null): null;
+    parseAsOrThrow<T>(text: string, cls: GenConstructor<T>): T;
+    parseAsOrThrow<T>(text: string, cls: PTy | GenConstructor<T>) {
+        return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
+    }
+
+    /** Parse the JSON text as a member of the given type. */
+    parseAs(text: string, cls: AnyTyTy): JsonParseResult<any>;
+    parseAs(text: string, cls: BooleanConstructor): JsonParseResult<Boolean>;
+    parseAs(text: string, cls: NumberConstructor): JsonParseResult<Number>;
+    parseAs(text: string, cls: StringConstructor): JsonParseResult<String>;
+    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<Array<unknown>>;
+    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<Array<unknown>>;
+    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<Object>;
+    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<Object>;
+    parseAs(text: string, cls: null): JsonParseResult<null>;
+    parseAs<T>(text: string, cls: GenConstructor<T>): JsonParseResult<T>;
+    parseAs<T>(text: string, cls: PTy | GenConstructor<T>) {
+        return parse(text).mapCollecting(v => this.loadAs(v, cls));
+    }
+
+    static failParse<T>(err: JsonParseError): JsonParseResult<T> {
         return Either.fail(err);
     }
 
-    export function parseOk<T>(x: T): JsonParseResult<T> {
+    static parseOk<T>(x: T): JsonParseResult<T> {
         return Either.pure(x);
     }
 
-    export class FieldTypeMismatch extends JsonParseError {
+    static FieldTypeMismatch = class extends JsonParseError {
         constructor(message: string) {
             super(message);
         }
     }
 
-    export class JsonTypeError extends JsonParseError {
+    static JsonTypeError = class extends JsonParseError {
         private expected: string;
         private value: any;
 
@@ -203,7 +326,7 @@ export module JsonParser {
         }
     }
 
-    export class MissingKeysError extends JsonParseError {
+    static MissingKeysError = class extends JsonParseError {
         private keys: string[];
 
         constructor(keys: string[]) {
@@ -212,7 +335,7 @@ export module JsonParser {
         }
     }
 
-    export class UnknownKeysError extends JsonParseError {
+    static UnknownKeysError = class extends JsonParseError {
         private keys: string[];
 
         constructor(keys: string[]) {
@@ -222,19 +345,21 @@ export module JsonParser {
     }
 }
 
+type StringKeyed<T> = { [k: string]: T };
+
 /** Schema that specifies how to load a specific class from JSON. */
 export class JsonSchema<T> {
-    private parser: { onObject: (json: JsonObject, schemas: Schemas) => JsonParseResult<T> };
+    private objectParser: { onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T> };
     private description: string;
 
-    constructor(description: string, parser: { onObject: (json: JsonObject, schemas: Schemas) => JsonParseResult<T> }) {
-        this.parser = parser;
+    constructor(description: string, objectParser: { onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T> }) {
+        this.objectParser = objectParser;
         this.description = description;
     }
 
-    static objectSchema<T>(desc: string, ks: { [k: string]: PTy }, onRes: (x: { [k: string]: any }) => T): JsonSchema<T> {
-        return new JsonSchema(desc, new (class {
-            onObject(json: JsonObject, schemas: Schemas): JsonParseResult<T> {
+    static objectSchema<T>(desc: string, ks: StringKeyed<PTy>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onObject(parser: JsonParser, json: JsonObject): JsonParseResult<T> {
                 const unreadKeys = new Set<string>();
                 const missedKeys = new Set<string>();
                 for (const ksk in ks) {
@@ -247,7 +372,7 @@ export class JsonSchema<T> {
                         if (ksk == k) {
                             unreadKeys.delete(k);
                             missedKeys.delete(ksk);
-                            const v = loadAs(kv, ks[ksk], schemas);
+                            const v = parser.loadAs(kv, ks[ksk]);
                             if (v.isLeft()) {
                                 return v.propLeft();
                             }
@@ -263,7 +388,7 @@ export class JsonSchema<T> {
                 }
                 return JsonParser.parseOk(onRes(res));
             }
-        })());
+        });
     }
 
     /** Get a human-readable description of what the schema parses. */
@@ -271,8 +396,8 @@ export class JsonSchema<T> {
         return this.description;
     };
 
-    onObject(o: JsonObject, schemas: Schemas): JsonParseResult<T> {
-        return this.parser.onObject(o, schemas);
+    onObject(parser: JsonParser, o: JsonObject): JsonParseResult<T> {
+        return this.objectParser.onObject(parser, o);
     }
 }
 
@@ -300,123 +425,3 @@ type JsonJSType<T> = JsonJSType<T>[] | Boolean | null | Number | String | T;
 type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
 
 type Schemas = Map<PTy, JsonSchema<any>>;
-
-/** Parse the JSON text as a member of the given type. */
-function loadAs<T>(jv: JsonValue, cls: PTy, schemas: Schemas): JsonParseResult<JsonJSType<T>> {
-    const typeError: (d: string) => JsonParseResult<JsonJSType<T>> = (desc: string) => {
-        return JsonParser.failParse(new JsonParser.JsonTypeError(desc, jv._unwrap()));
-    };
-
-    if (schemas.get(cls) !== undefined) {
-        const schema = schemas.get(cls) as JsonSchema<T>;
-        if (jv instanceof JsonObject) {
-            return schema.onObject(jv, schemas);
-        }
-        return typeError(schema.getDescription());
-    }
-    if (cls === Array) {
-        return loadAs(jv, [Array, AnyTy], schemas);
-    }
-    if (cls === Object) {
-        return loadAs(jv, [Object, AnyTy], schemas);
-    }
-    if (cls === AnyTy) {
-        if (jv instanceof JsonArray) {
-            return loadAs(jv, [Array, AnyTy], schemas);
-        } else if (jv instanceof JsonObject) {
-            return loadAs(jv, [Object, AnyTy], schemas);
-        } else {
-            return JsonParser.parseOk(jv._unwrap());
-        }
-    }
-    if (cls instanceof Array) {
-        if (cls[0] === Array) {
-            if (jv instanceof JsonArray) {
-                const arr: Array<JsonValue> = (jv as JsonArray).unwrap();
-                return Either.catEithers(arr.map(x => loadAs(x, cls[1] as PTy, schemas)));
-            }
-            return typeError('array');
-        }
-        if (cls[0] === Object) {
-            if (jv instanceof JsonObject) {
-                const o = (jv as JsonObject).unwrap();
-                const res: any = new Object();
-                for (const [k, _] of o) {
-                    const r = loadAs(o.get(k) as JsonValue, cls[1], schemas);
-                    if (r.isLeft()) {
-                        return r.propLeft();
-                    } else {
-                        res[k] = r.unwrapRight();
-                    }
-                };
-                return JsonParser.parseOk(res);
-            }
-            return typeError('object');
-        }
-    }
-    if (cls === Boolean) {
-        if (jv instanceof JsonBoolean) {
-            return JsonParser.parseOk(jv.unwrap());
-        }
-        return typeError('boolean');
-    }
-    if (cls === null) {
-        if (jv instanceof JsonNull) {
-            return JsonParser.parseOk(jv.unwrap());
-        }
-        return typeError('null');
-    }
-    if (cls === Number) {
-        if (jv instanceof JsonNumber) {
-            return JsonParser.parseOk(jv.unwrap());
-        }
-        return typeError('number');
-    }
-    if (cls === String) {
-        if (jv instanceof JsonString) {
-            return JsonParser.parseOk(jv.unwrap());
-        }
-        return typeError('string');
-    }
-    throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
-}
-
-/**
- * Parse the JSON text as a member of the given type.
- *
- * Similar to {@link parseAs}, but throw any resulting exception immediately.
- */
-export function parseAsOrThrow(text: string, cls: AnyTyTy, schemas?: Schemas): any;
-export function parseAsOrThrow(text: string, cls: BooleanConstructor, schemas?: Schemas): Boolean;
-export function parseAsOrThrow(text: string, cls: NumberConstructor, schemas?: Schemas): Number;
-export function parseAsOrThrow(text: string, cls: StringConstructor, schemas?: Schemas): String;
-export function parseAsOrThrow(text: string, cls: ArrayConstructor, schemas?: Schemas): Array<unknown>;
-export function parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy], schemas?: Schemas): Array<unknown>;
-export function parseAsOrThrow(text: string, cls: ObjectConstructor, schemas?: Schemas): Object;
-export function parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy], schemas?: Schemas): Object;
-export function parseAsOrThrow(text: string, cls: null, schemas?: Schemas): null;
-export function parseAsOrThrow<T>(text: string, cls: GenConstructor<T>, schemas?: Schemas): T;
-export function parseAsOrThrow<T>(text: string, cls: PTy | GenConstructor<T>, schemas?: Schemas) {
-    if (schemas === undefined) {
-        schemas = new Map();
-    }
-    return parse(text).mapCollecting(v => loadAs(v, cls, schemas as Schemas)).either(err => { throw err }, r => r);
-}
-
-/** Parse the JSON text as a member of the given type. */
-export function parseAs(text: string, cls: AnyTyTy, schemas?: Schemas): JsonParseResult<any>;
-export function parseAs(text: string, cls: BooleanConstructor, schemas?: Schemas): JsonParseResult<Boolean>;
-export function parseAs(text: string, cls: NumberConstructor, schemas?: Schemas): JsonParseResult<Number>;
-export function parseAs(text: string, cls: StringConstructor, schemas?: Schemas): JsonParseResult<String>;
-export function parseAs(text: string, cls: ArrayConstructor, schemas?: Schemas): JsonParseResult<Array<unknown>>;
-export function parseAs(text: string, cls: [ArrayConstructor, PTy], schemas?: Schemas): JsonParseResult<Array<unknown>>;
-export function parseAs(text: string, cls: ObjectConstructor, schemas?: Schemas): JsonParseResult<Object>;
-export function parseAs(text: string, cls: [ObjectConstructor, PTy], schemas?: Schemas): JsonParseResult<Object>;
-export function parseAs(text: string, cls: null, schemas?: Schemas): JsonParseResult<null>;
-export function parseAs<T>(text: string, cls: GenConstructor<T>, schemas?: Schemas): JsonParseResult<T>;
-export function parseAs<T>(text: string, cls: PTy | GenConstructor<T>, schemas?: Schemas) {
-    if (schemas === undefined) {
-        schemas = new Map();
-    }
-    return parse(text).mapCollecting(v => loadAs(v, cls, schemas as Schemas));
-}
