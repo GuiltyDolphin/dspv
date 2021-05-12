@@ -8,7 +8,8 @@ import {
     AnyTy,
     JsonParser,
     JsonParseResult,
-    JsonSchema
+    JsonSchema,
+    TySpec,
 } from '../mod.ts';
 
 const basicParser = new JsonParser();
@@ -64,24 +65,23 @@ function testGroup(topDesc: string, ...tests: Testable[]): TestGroup {
     return new TestGroup(topDesc, ...tests);
 }
 
-function testParseAsOrThrowWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: any, expected: any): Test {
+function testParseAsOrThrowWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: TySpec, expected: unknown): Test {
     return new Test(innerDesc, () => {
         assertEquals(parser.parseAsOrThrow(toParse, ty), expected);
     });
 }
 
-function testParseAsOrThrowFailsWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: any, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
-    //function testParseAsOrThrowFailsWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: ParseTySpec<any>, errTy: { new(...args: any[]): any }, msgIncludes?: string) {
+function testParseAsOrThrowFailsWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
     return new Test(innerDesc, () => {
         assertThrows(() => parser.parseAsOrThrow(toParse, ty), errTy, msgIncludes);
     });
 }
 
-function testParseAsOrThrow(innerDesc: string, toParse: string, ty: any, expected: any): Test {
+function testParseAsOrThrow(innerDesc: string, toParse: string, ty: TySpec, expected: any): Test {
     return testParseAsOrThrowWithParser(basicParser, innerDesc, toParse, ty, expected);
 }
 
-function testParseAsOrThrowFails(innerDesc: string, toParse: string, ty: any, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
+function testParseAsOrThrowFails(innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
     return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, errTy, msgIncludes);
 }
 

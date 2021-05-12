@@ -5,5 +5,6 @@ export {
 } from "./src/json.ts";
 
 export type {
-    JsonParseResult
+    JsonParseResult,
+    TySpec
 } from "./src/json.ts";

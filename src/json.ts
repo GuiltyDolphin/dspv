@@ -19,8 +19,6 @@ type JsonType = GenJsonType<JsonValue>;
 /** Types that are directly JSON compatible. */
 type JsonValueRaw = JsonValueRaw[] | boolean | null | number | { [k: string]: JsonValueRaw } | string;
 
-type JsonJSType<T> = JsonJSType<T>[] | JsonType[keyof JsonType] | { [k: string]: JsonJSType<T> } | T;
-
 type JsonTypeName = keyof JsonType;
 
 class GenJsonValue<T extends JsonTypeName> {
@@ -112,7 +110,6 @@ class GenJsonValue<T extends JsonTypeName> {
     }
 }
 
-
 type JsonValue = GenJsonValue<keyof JsonType>;
 
 type JsonArray = GenJsonValue<"array">;
@@ -186,17 +183,16 @@ export class JsonParser {
     }
 
     /** Parse the JSON text as a member of the given type. */
-    loadAs<T>(jv: JsonValue, cls: PTy): JsonParseResult<JsonJSType<T>> {
-        const typeError: (d: string) => JsonParseResult<JsonJSType<T>> = (desc: string) => {
+    loadAs<T>(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
+        const typeError: (d: string) => JsonParseResult<any> = (desc: string) => {
             return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv.unwrapFully()));
         };
-
-        if (this.schemas.get(cls) !== undefined) {
-            const schema = this.schemas.get(cls);
+        const schema = this.schemas.get(cls);
+        if (schema !== undefined) {
             if (schema instanceof JsonSchema) {
-                return (schema as JsonSchema<T>).on(this, jv);
+                return schema.on(this, jv);
             } else {
-                return this.loadAs(jv, schema as PTy);
+                return this.loadAs(jv, schema);
             }
         }
         if (cls === AnyTy) {
@@ -212,7 +208,7 @@ export class JsonParser {
             if (cls[0] === Array) {
                 if (jv.isArray()) {
                     const arr: Array<JsonValue> = jv.unwrap();
-                    return Either.catEithers(arr.map(x => this.loadAs(x, cls[1] as PTy)));
+                    return Either.catEithers(arr.map(x => this.loadAs(x, cls[1])));
                 }
                 return typeError('array');
             }
@@ -241,32 +237,12 @@ export class JsonParser {
      *
      * Similar to {@link parseAs}, but throw any resulting exception immediately.
      */
-    parseAsOrThrow(text: string, cls: AnyTyTy): JsonValueRaw;
-    parseAsOrThrow(text: string, cls: BooleanConstructor): boolean;
-    parseAsOrThrow(text: string, cls: NumberConstructor): number;
-    parseAsOrThrow(text: string, cls: StringConstructor): string;
-    parseAsOrThrow(text: string, cls: null): null;
-    parseAsOrThrow(text: string, cls: ArrayConstructor): JsonValueRaw[];
-    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): JsonValueRaw[];
-    parseAsOrThrow(text: string, cls: ObjectConstructor): StringKeyed<JsonValueRaw>;
-    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): StringKeyed<JsonValueRaw>;
-    parseAsOrThrow<T>(text: string, cls: GenConstructor<T>): T;
-    parseAsOrThrow<T>(text: string, cls: PTy | GenConstructor<T>) {
+    parseAsOrThrow(text: string, cls: TySpec): any {
         return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
     }
 
     /** Parse the JSON text as a member of the given type. */
-    parseAs(text: string, cls: AnyTyTy): JsonParseResult<JsonValueRaw>;
-    parseAs(text: string, cls: BooleanConstructor): JsonParseResult<boolean>;
-    parseAs(text: string, cls: NumberConstructor): JsonParseResult<number>;
-    parseAs(text: string, cls: StringConstructor): JsonParseResult<string>;
-    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<JsonValueRaw[]>;
-    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<JsonValueRaw[]>;
-    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<StringKeyed<JsonValueRaw>>;
-    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<StringKeyed<JsonValueRaw>>;
-    parseAs(text: string, cls: null): JsonParseResult<null>;
-    parseAs<T>(text: string, cls: GenConstructor<T>): JsonParseResult<T>;
-    parseAs<T>(text: string, cls: PTy | GenConstructor<T>) {
+    parseAs(text: string, cls: TySpec): any {
         return parse(text).mapCollecting(v => this.loadAs(v, cls));
     }
 
@@ -374,7 +350,7 @@ export class JsonSchema<T> {
         });
     }
 
-    static objectSchema<T>(desc: string, ks: StringKeyed<PTy>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
+    static objectSchema<T>(desc: string, ks: StringKeyed<TySpec>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
             onObject(parser: JsonParser, json: JsonObject): JsonParseResult<T> {
                 const unreadKeys = new Set<string>();
@@ -444,29 +420,19 @@ interface Constructor {
     new(...args: any[]): any;
 }
 
-/**
- * Generic constructor.
- *
- * Note that this is different from {@link Constructor} in that new on
- * Boolean does not match GenConstructor<Boolean>, but does match
- * Constructor.
- */
-interface GenConstructor<T> {
-    new(...args: any[]): T;
-}
-
 /** Represents values that can take any type. */
 export const AnyTy = Symbol("AnyTy");
 type AnyTyTy = typeof AnyTy;
 
-type PTy = BooleanConstructor | NumberConstructor | StringConstructor | null | Constructor | [ArrayConstructor, PTy] | [ObjectConstructor, PTy] | AnyTyTy
+type Schemas = Map<TySpec, JsonSchema<any> | TySpec>;
 
-type Schemas = Map<PTy, JsonSchema<any> | PTy>;
-
-const defaultSchema: Schemas = new Map<PTy, JsonSchema<any> | PTy>()
+const defaultSchema: Schemas = new Map<TySpec, JsonSchema<any> | TySpec>()
     .set(Array, [Array, AnyTy])
     .set(Boolean, JsonSchema.booleanSchema('boolean', x => x))
     .set(null, JsonSchema.nullSchema('null', x => x))
     .set(Number, JsonSchema.numberSchema('number', x => x))
     .set(Object, [Object, AnyTy])
     .set(String, JsonSchema.stringSchema('string', x => x));
+
+/** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
+export type TySpec = AnyTyTy | null | Constructor | [Constructor, TySpec];
