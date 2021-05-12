@@ -16,17 +16,8 @@ type GenJsonType<T> = {
  */
 type JsonType = GenJsonType<JsonValue>;
 
-type JsonValueRaw = JsonValueRaw[] | boolean | null | number | { [k: string]: JsonValueRaw } | string;
-
-/**
-  * Possible types for a JSON value.
-  *
-  * Similar to {@link JsonType}, but only containing raw values and not tracked JsonValues.
-  */
-type JsonTypeRaw = GenJsonType<JsonValueRaw>;
-
 /** Types that are directly JSON compatible. */
-type JsonCompatTy = JsonCompatTy[] | boolean | null | number | { [k: string]: JsonCompatTy } | string;
+type JsonValueRaw = JsonValueRaw[] | boolean | null | number | { [k: string]: JsonValueRaw } | string;
 
 type JsonJSType<T> = JsonJSType<T>[] | JsonType[keyof JsonType] | { [k: string]: JsonJSType<T> } | T;
 
@@ -250,29 +241,29 @@ export class JsonParser {
      *
      * Similar to {@link parseAs}, but throw any resulting exception immediately.
      */
-    parseAsOrThrow(text: string, cls: AnyTyTy): any;
+    parseAsOrThrow(text: string, cls: AnyTyTy): JsonValueRaw;
     parseAsOrThrow(text: string, cls: BooleanConstructor): boolean;
     parseAsOrThrow(text: string, cls: NumberConstructor): number;
     parseAsOrThrow(text: string, cls: StringConstructor): string;
-    parseAsOrThrow(text: string, cls: ArrayConstructor): JsonCompatTy[];
-    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): JsonCompatTy[];
-    parseAsOrThrow(text: string, cls: ObjectConstructor): StringKeyed<JsonCompatTy>;
-    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): StringKeyed<JsonCompatTy>;
     parseAsOrThrow(text: string, cls: null): null;
+    parseAsOrThrow(text: string, cls: ArrayConstructor): JsonValueRaw[];
+    parseAsOrThrow(text: string, cls: [ArrayConstructor, PTy]): JsonValueRaw[];
+    parseAsOrThrow(text: string, cls: ObjectConstructor): StringKeyed<JsonValueRaw>;
+    parseAsOrThrow(text: string, cls: [ObjectConstructor, PTy]): StringKeyed<JsonValueRaw>;
     parseAsOrThrow<T>(text: string, cls: GenConstructor<T>): T;
     parseAsOrThrow<T>(text: string, cls: PTy | GenConstructor<T>) {
         return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
     }
 
     /** Parse the JSON text as a member of the given type. */
-    parseAs(text: string, cls: AnyTyTy): JsonParseResult<any>;
+    parseAs(text: string, cls: AnyTyTy): JsonParseResult<JsonValueRaw>;
     parseAs(text: string, cls: BooleanConstructor): JsonParseResult<boolean>;
     parseAs(text: string, cls: NumberConstructor): JsonParseResult<number>;
     parseAs(text: string, cls: StringConstructor): JsonParseResult<string>;
-    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<JsonCompatTy[]>;
-    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<JsonCompatTy[]>;
-    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<StringKeyed<JsonCompatTy>>;
-    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<StringKeyed<JsonCompatTy>>;
+    parseAs(text: string, cls: ArrayConstructor): JsonParseResult<JsonValueRaw[]>;
+    parseAs(text: string, cls: [ArrayConstructor, PTy]): JsonParseResult<JsonValueRaw[]>;
+    parseAs(text: string, cls: ObjectConstructor): JsonParseResult<StringKeyed<JsonValueRaw>>;
+    parseAs(text: string, cls: [ObjectConstructor, PTy]): JsonParseResult<StringKeyed<JsonValueRaw>>;
     parseAs(text: string, cls: null): JsonParseResult<null>;
     parseAs<T>(text: string, cls: GenConstructor<T>): JsonParseResult<T>;
     parseAs<T>(text: string, cls: PTy | GenConstructor<T>) {
