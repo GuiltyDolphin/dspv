@@ -1,4 +1,4 @@
-import { Either, Maybe } from './deps.ts';
+import { Either } from './deps.ts';
 
 type GenJsonType<T> = {
     "array": T[],
