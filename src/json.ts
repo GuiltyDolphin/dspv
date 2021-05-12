@@ -127,11 +127,11 @@ type JsonString = GenJsonValue<"string">;
 export function toJsonValue(x: any): Either<string, JsonValue> {
     const pure = Either.pure;
     const fail = Either.fail;
-    if (typeof x == 'string') {
+    if (typeof x === 'string') {
         return pure(GenJsonValue.jsonString(x));
-    } else if (typeof x == 'boolean') {
+    } else if (typeof x === 'boolean') {
         return pure(GenJsonValue.jsonBoolean(x));
-    } else if (typeof x == 'number') {
+    } else if (typeof x === 'number') {
         return pure(GenJsonValue.jsonNumber(x));
     } else if (x === null) {
         return pure(GenJsonValue.jsonNull());
@@ -145,9 +145,9 @@ export function toJsonValue(x: any): Either<string, JsonValue> {
             res[i] = ijson.unwrapRight();
         }
         return pure(GenJsonValue.jsonArray(res));
-    } else if (typeof x == 'function') {
+    } else if (typeof x === 'function') {
         return fail('functions not supported by JSON');
-    } else if (typeof x == 'object') {
+    } else if (typeof x === 'object') {
         const res: { [k: string]: JsonValue } = {};
         for (const k in x) {
             const kjson = toJsonValue(x[k]);
