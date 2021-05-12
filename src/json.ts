@@ -1,172 +1,174 @@
 import { Either, Maybe } from './deps.ts';
 
-enum JsonType {
-    ARRAY = "ARRAY",
-    BOOLEAN = "BOOLEAN",
-    NULL = "NULL",
-    NUMBER = "NUMBER",
-    OBJECT = "OBJECT",
-    STRING = "STRING"
+type GenJsonType<T> = {
+    "array": T[],
+    "boolean": boolean,
+    "null": null,
+    "number": number,
+    "object": { [k: string]: T },
+    "string": string
 }
+
+/**
+ * Possible types for a JSON value.
+ *
+ * Here, elements of arrays and values of objects are themselves JSON values.
+ */
+type JsonType = GenJsonType<JsonValue>;
+
+type JsonValueRaw = JsonValueRaw[] | boolean | null | number | { [k: string]: JsonValueRaw } | string;
+
+/**
+  * Possible types for a JSON value.
+  *
+  * Similar to {@link JsonType}, but only containing raw values and not tracked JsonValues.
+  */
+type JsonTypeRaw = GenJsonType<JsonValueRaw>;
 
 /** Types that are directly JSON compatible. */
 type JsonCompatTy = JsonCompatTy[] | boolean | null | number | { [k: string]: JsonCompatTy } | string;
 
-type JsonJSType<T> = JsonJSType<T>[] | JsonCompatTy | { [k: string]: JsonJSType<T> } | T;
+type JsonJSType<T> = JsonJSType<T>[] | JsonType[keyof JsonType] | { [k: string]: JsonJSType<T> } | T;
 
-abstract class GenJsonValue<T extends JsonCompatTy> {
-    protected value: any;
-    protected ty: JsonType;
+type JsonTypeName = keyof JsonType;
 
-    constructor(value: any, ty: JsonType) {
+class GenJsonValue<T extends JsonTypeName> {
+    private value: JsonType[T];
+    protected ty: T;
+
+    constructor(value: JsonType[T], ty: T) {
         this.value = value;
         this.ty = ty;
     }
 
-    getType(): JsonType {
+    getType(): JsonTypeName {
         return this.ty;
     }
 
-    _unwrap(): T {
+    unwrap(): JsonType[T] {
         return this.value;
     }
-}
 
-type JsonValue = GenJsonValue<JsonCompatTy>;
-
-class JsonArray extends GenJsonValue<JsonCompatTy[]> {
-    arr: JsonValue[];
-
-    constructor(...x: JsonValue[]) {
-        const a = x;
-        super(a, JsonType.ARRAY);
-        this.arr = a;
+    isArray(): this is GenJsonValue<"array"> {
+        return this.getType() === "array";
     }
 
-    size(): number {
-        return this.arr.length;
+    isBoolean(): this is GenJsonValue<"boolean"> {
+        return this.getType() === "boolean";
     }
 
-    get(i: number) {
-        return this.arr[i];
+    isNull(): this is GenJsonValue<"null"> {
+        return this.getType() === "null";
     }
 
-    set(i: number, v: JsonValue) {
-        this.arr[i] = v;
+    isNumber(): this is GenJsonValue<"number"> {
+        return this.getType() === "number";
     }
 
-    unwrap(): JsonValue[] {
-        return this.arr;
-    }
-}
-
-class JsonBoolean extends GenJsonValue<boolean> {
-    constructor(x: boolean) {
-        super(x, JsonType.BOOLEAN);
+    isObject(): this is GenJsonValue<"object"> {
+        return this.getType() === "object";
     }
 
-    unwrap(): boolean {
-        return this.value;
-    }
-}
-
-class JsonNull extends GenJsonValue<null> {
-    constructor() {
-        super(null, JsonType.NULL);
+    isString(): this is GenJsonValue<"string"> {
+        return this.getType() === "string";
     }
 
-    unwrap(): null {
-        return null;
-    }
-}
-
-class JsonNumber extends GenJsonValue<number> {
-    constructor(x: number) {
-        super(x, JsonType.NUMBER);
-    }
-
-    unwrap(): number {
-        return this.value;
-    }
-}
-
-class JsonObject extends GenJsonValue<{ [k: string]: JsonCompatTy }> {
-    private map: Map<string, JsonValue>;
-
-    constructor() {
-        const m = new Map<string, JsonValue>();
-        super(m, JsonType.OBJECT);
-        this.map = m;
-    }
-
-    get(k: string): Maybe<JsonValue> {
-        if (this.map.has(k)) {
-            const v: any = this.map.get(k);
-            return Maybe.some(v);
+    unwrapFully(): JsonValueRaw {
+        if (this.isArray()) {
+            return this.value.map(v => v.unwrapFully());
+        } else if (this.isBoolean()) {
+            return this.value;
+        } else if (this.isNull()) {
+            return this.value;
+        } else if (this.isNumber()) {
+            return this.value;
+        } else if (this.isObject()) {
+            const res: { [k: string]: JsonValueRaw } = {};
+            const v = this.value;
+            for (const k in v) {
+                res[k] = v[k].unwrapFully();
+            }
+            return res;
+        } else if (this.isString()) {
+            return this.value;
+        } else {
+            throw new Error("unreachable");
         }
-        return Maybe.none();
     }
 
-    set(k: string, v: JsonValue) {
-        return this.map.set(k, v);
+    static jsonArray(xs: JsonValue[]): JsonArray {
+        return new GenJsonValue(xs, "array");
     }
 
-    asMap(): Map<string, JsonValue> {
-        return this.map;
+    static jsonBoolean(b: boolean): JsonBoolean {
+        return new GenJsonValue(b, "boolean");
     }
 
-    keys(): Set<string> {
-        return new Set<string>(this.map.keys());
+    static jsonNull(): JsonNull {
+        return new GenJsonValue(null, "null");
     }
 
-    unwrap(): Map<string, JsonValue> {
-        return this.map;
+    static jsonNumber(n: number): JsonNumber {
+        return new GenJsonValue(n, "number");
+    }
+
+    static jsonObject(o: { [k: string]: JsonValue }): JsonObject {
+        return new GenJsonValue(o, "object");
+    }
+
+    static jsonString(s: string): JsonString {
+        return new GenJsonValue(s, "string");
     }
 }
 
-class JsonString extends GenJsonValue<string> {
-    constructor(x: string) {
-        super(x, JsonType.STRING);
-    }
 
-    unwrap(): string {
-        return this._unwrap();
-    }
-}
+type JsonValue = GenJsonValue<keyof JsonType>;
+
+type JsonArray = GenJsonValue<"array">;
+
+type JsonBoolean = GenJsonValue<"boolean">;
+
+type JsonObject = GenJsonValue<"object">;
+
+type JsonNull = GenJsonValue<"null">;
+
+type JsonNumber = GenJsonValue<"number">;
+
+type JsonString = GenJsonValue<"string">;
 
 export function toJsonValue(x: any): Either<string, JsonValue> {
     const pure = Either.pure;
     const fail = Either.fail;
     if (typeof x == 'string') {
-        return pure(new JsonString(x));
+        return pure(GenJsonValue.jsonString(x));
     } else if (typeof x == 'boolean') {
-        return pure(new JsonBoolean(x));
+        return pure(GenJsonValue.jsonBoolean(x));
     } else if (typeof x == 'number') {
-        return pure(new JsonNumber(x));
+        return pure(GenJsonValue.jsonNumber(x));
     } else if (x === null) {
-        return pure(new JsonNull());
+        return pure(GenJsonValue.jsonNull());
     } else if (x instanceof Array) {
-        const res = new JsonArray();
+        const res = [];
         for (let i = 0; i < x.length; i++) {
             const ijson = toJsonValue(x[i]);
             if (ijson.isLeft()) {
                 return ijson.propLeft();
             }
-            res.set(i, ijson.unwrapRight());
+            res[i] = ijson.unwrapRight();
         }
-        return pure(res);
+        return pure(GenJsonValue.jsonArray(res));
     } else if (typeof x == 'function') {
         return fail('functions not supported by JSON');
     } else if (typeof x == 'object') {
-        const res = new JsonObject();
+        const res: { [k: string]: JsonValue } = {};
         for (const k in x) {
             const kjson = toJsonValue(x[k]);
             if (kjson.isLeft()) {
                 return kjson.propLeft();
             }
-            res.set(k, kjson.unwrapRight());
+            res[k] = kjson.unwrapRight();
         }
-        return pure(res);
+        return pure(GenJsonValue.jsonObject(res));
     }
     return fail(`could not load JSON value: ${x}`);
 }
@@ -195,7 +197,7 @@ export class JsonParser {
     /** Parse the JSON text as a member of the given type. */
     loadAs<T>(jv: JsonValue, cls: PTy): JsonParseResult<JsonJSType<T>> {
         const typeError: (d: string) => JsonParseResult<JsonJSType<T>> = (desc: string) => {
-            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv._unwrap()));
+            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv.unwrapFully()));
         };
 
         if (this.schemas.get(cls) !== undefined) {
@@ -207,28 +209,28 @@ export class JsonParser {
             }
         }
         if (cls === AnyTy) {
-            if (jv instanceof JsonArray) {
+            if (jv.isArray()) {
                 return this.loadAs(jv, [Array, AnyTy]);
-            } else if (jv instanceof JsonObject) {
+            } else if (jv.isObject()) {
                 return this.loadAs(jv, [Object, AnyTy]);
             } else {
-                return JsonParser.parseOk(jv._unwrap());
+                return JsonParser.parseOk(jv.unwrapFully());
             }
         }
         if (cls instanceof Array) {
             if (cls[0] === Array) {
-                if (jv instanceof JsonArray) {
-                    const arr: Array<JsonValue> = (jv as JsonArray).unwrap();
+                if (jv.isArray()) {
+                    const arr: Array<JsonValue> = jv.unwrap();
                     return Either.catEithers(arr.map(x => this.loadAs(x, cls[1] as PTy)));
                 }
                 return typeError('array');
             }
             if (cls[0] === Object) {
-                if (jv instanceof JsonObject) {
-                    const o = (jv as JsonObject).unwrap();
+                if (jv.isObject()) {
+                    const o = jv.unwrap();
                     const res: any = new Object();
-                    for (const [k, _] of o) {
-                        const r = this.loadAs(o.get(k) as JsonValue, cls[1]);
+                    for (const k in o) {
+                        const r = this.loadAs(o[k], cls[1]);
                         if (r.isLeft()) {
                             return r.propLeft();
                         } else {
@@ -340,9 +342,9 @@ export class JsonSchema<T> {
     private description: string;
 
     constructor(description: string, objectParser: Partial<JParser<T>>) {
-        const failWith: <O extends GenJsonValue<JsonCompatTy>>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends GenJsonValue<JsonCompatTy>>(tyDesc: string) => {
+        const failWith: <O extends JsonValue>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>(tyDesc: string) => {
             return (_parser: JsonParser, o: O) => {
-                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, String(o._unwrap())));
+                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, String(o.unwrapFully())));
             };
         };
         this.objectParser = {
@@ -390,13 +392,14 @@ export class JsonSchema<T> {
                     missedKeys.add(ksk);
                 }
                 const res = new Map<string, any>();
-                for (const [k, kv] of json.asMap()) {
+                const obj = json.unwrap();
+                for (const k in obj) {
                     unreadKeys.add(k);
                     for (const ksk in ks) {
                         if (ksk == k) {
                             unreadKeys.delete(k);
                             missedKeys.delete(ksk);
-                            const v = parser.loadAs(kv, ks[ksk]);
+                            const v = parser.loadAs(obj[k], ks[ksk]);
                             if (v.isLeft()) {
                                 return v.propLeft();
                             }
@@ -429,22 +432,17 @@ export class JsonSchema<T> {
     };
 
     on(parser: JsonParser, o: JsonValue): JsonParseResult<T> {
-        if (o instanceof JsonArray) {
+        if (o.isArray()) {
             return this.objectParser.onArray(parser, o);
-        }
-        if (o instanceof JsonBoolean) {
+        } else if (o.isBoolean()) {
             return this.objectParser.onBoolean(parser, o);
-        }
-        if (o instanceof JsonNull) {
+        } else if (o.isNull()) {
             return this.objectParser.onNull(parser, o);
-        }
-        if (o instanceof JsonNumber) {
+        } else if (o.isNumber()) {
             return this.objectParser.onNumber(parser, o);
-        }
-        if (o instanceof JsonObject) {
+        } else if (o.isObject()) {
             return this.objectParser.onObject(parser, o);
-        }
-        if (o instanceof JsonString) {
+        } else if (o.isString()) {
             return this.objectParser.onString(parser, o);
         }
         throw new Error("fatal: unknown class representing a JSON value: " + String(o.constructor));
