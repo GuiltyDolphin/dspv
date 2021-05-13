@@ -1,4 +1,4 @@
-import { Either } from './deps.ts';
+import { Either, Maybe } from './deps.ts';
 
 type GenJsonType<T> = {
     "array": T[],
@@ -182,22 +182,16 @@ export class JsonParser {
     private schemas: Schemas;
 
     constructor(schemas?: Schemas, noDefault?: boolean) {
-        schemas = new Map([...(noDefault ? [] : defaultSchema), ...(schemas !== undefined ? schemas : [])]);
+        schemas = Schemas.mergeSchemas(noDefault ? Schemas.emptySchemas() : defaultSchema, schemas !== undefined ? schemas : Schemas.emptySchemas());
         this.schemas = schemas;
     }
 
     /** Parse the JSON text as a member of the given type. */
     loadAs<T>(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
-        const typeError: (d: string) => JsonParseResult<any> = (desc: string) => {
-            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv));
-        };
-        const schema = this.schemas.get(cls);
-        if (schema !== undefined) {
-            if (schema instanceof JsonSchema) {
-                return schema.on(this, jv);
-            } else {
-                return this.loadAs(jv, schema);
-            }
+        const maybeSchema = this.schemas.getSchemaForSpec(cls);
+        if (maybeSchema.isSome()) {
+            const schema = maybeSchema.unwrap();
+            return schema.on(this, jv);
         }
         if (cls === AnyTy) {
             if (jv.isArray()) {
@@ -206,31 +200,6 @@ export class JsonParser {
                 return this.loadAs(jv, [Object, AnyTy]);
             } else {
                 return JsonParser.parseOk(jv.unwrapFully());
-            }
-        }
-        if (cls instanceof Array) {
-            if (cls[0] === Array) {
-                if (jv.isArray()) {
-                    const arr: Array<JsonValue> = jv.unwrap();
-                    return Either.catEithers(arr.map(x => this.loadAs(x, cls[1])));
-                }
-                return typeError('array');
-            }
-            if (cls[0] === Object) {
-                if (jv.isObject()) {
-                    const o = jv.unwrap();
-                    const res: any = new Object();
-                    for (const k in o) {
-                        const r = this.loadAs(o[k], cls[1]);
-                        if (r.isLeft()) {
-                            return r.propLeft();
-                        } else {
-                            res[k] = r.unwrapRight();
-                        }
-                    };
-                    return JsonParser.parseOk(res);
-                }
-                return typeError('object');
             }
         }
         throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
@@ -333,6 +302,23 @@ export class JsonSchema<T> {
         this.description = description;
     }
 
+    static arraySchema<T>(desc: string, eltSpec: TySpec, onRes: (x: any[]) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onArray(parser: JsonParser, json: JsonArray): JsonParseResult<T> {
+                const res = new Array<any>();
+                const arr = json.unwrap();
+                for (let i = 0; i < arr.length; i++) {
+                    const v = parser.loadAs(arr[i], eltSpec);
+                    if (v.isLeft()) {
+                        return v.propLeft();
+                    }
+                    res[i] = v.unwrapRight();
+                }
+                return JsonParser.parseOk(onRes(res));
+            }
+        });
+    }
+
     static booleanSchema<T>(desc: string, onRes: (x: boolean) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
             onBoolean(_parser: JsonParser, json: JsonBoolean): JsonParseResult<T> {
@@ -353,6 +339,23 @@ export class JsonSchema<T> {
         return new JsonSchema(desc, {
             onNumber(_parser: JsonParser, json: JsonNumber): JsonParseResult<T> {
                 return JsonParser.parseOk(onRes(json.unwrap()));
+            }
+        });
+    }
+
+    static objectSchemaMap<T>(desc: string, kfun: (k: string) => TySpec, onRes: (x: Map<string, any>) => T): JsonSchema<T> {
+        return new JsonSchema(desc, {
+            onObject(parser: JsonParser, json: JsonObject): JsonParseResult<T> {
+                const res = new Map<string, any>();
+                const obj = json.unwrap();
+                for (const k in obj) {
+                    const v = parser.loadAs(obj[k], kfun(k));
+                    if (v.isLeft()) {
+                        return v.propLeft();
+                    }
+                    res.set(k, v.unwrapRight());
+                }
+                return JsonParser.parseOk(onRes(res));
             }
         });
     }
@@ -431,15 +434,99 @@ interface Constructor {
 export const AnyTy = Symbol("AnyTy");
 type AnyTyTy = typeof AnyTy;
 
-type Schemas = Map<TySpec, JsonSchema<any> | TySpec>;
+export class Schemas {
+    private schemas: Map<TySpec, (...args: TySpec[]) => JsonSchema<any>>;
+    private aliases: Map<TySpec, TySpec>;
 
-const defaultSchema: Schemas = new Map<TySpec, JsonSchema<any> | TySpec>()
-    .set(Array, [Array, AnyTy])
-    .set(Boolean, JsonSchema.booleanSchema('boolean', x => x))
-    .set(null, JsonSchema.nullSchema('null', x => x))
-    .set(Number, JsonSchema.numberSchema('number', x => x))
-    .set(Object, [Object, AnyTy])
-    .set(String, JsonSchema.stringSchema('string', x => x));
+    constructor() {
+        this.schemas = new Map();
+        this.aliases = new Map();
+    }
+
+    addAlias(spec: TySpec, alias: TySpec): Schemas {
+        this.aliases.set(spec, alias);
+        return this;
+    }
+
+    addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)): Schemas {
+        if (schema instanceof JsonSchema) {
+            this.schemas.set(spec, () => schema);
+        } else {
+            this.schemas.set(spec, schema);
+        }
+        return this;
+    }
+
+    protected resolveAlias(spec: TySpec): TySpec {
+        const alias = this.aliases.get(spec);
+        if (alias === undefined) {
+            return spec;
+        }
+        return this.resolveAlias(alias);
+    }
+
+    getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
+        spec = this.resolveAlias(spec);
+        if (spec instanceof Array) {
+            const headSchema = this.schemas.get(spec[0]);
+            if (headSchema !== undefined) {
+                let [, ...rest] = spec;
+                return Maybe.some(headSchema(...rest));
+            } else {
+                return Maybe.none();
+            }
+        } else {
+            const schema = this.schemas.get(spec);
+            if (schema !== undefined) {
+                return Maybe.some(schema(spec));
+            }
+            return Maybe.none();
+        }
+    }
+
+    protected getSchemaMap(): Map<TySpec, (...args: TySpec[]) => JsonSchema<any>> {
+        return this.schemas;
+    }
+
+    protected getAliasMap(): Map<TySpec, TySpec> {
+        return this.aliases;
+    }
+
+    /** Merge with another schema, favouring definitions in the parameter schema. */
+    protected mergeWith(schemas: Schemas) {
+        this.schemas = new Map([...this.schemas, ...schemas.getSchemaMap()]);
+        this.aliases = new Map([...this.aliases, ...schemas.getAliasMap()]);
+    }
+
+    static emptySchemas(): Schemas {
+        return new Schemas();
+    }
+
+    /** Merge schemas into a new schema, favouring definitions in latter schemas if there is overlap. */
+    static mergeSchemas(...schemas: Schemas[]): Schemas {
+        const newSchemas = new Schemas();
+        schemas.map(e => newSchemas.mergeWith(e));
+        return newSchemas;
+    }
+}
+
+function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
+    const res: { [k: string]: T } = {};
+    for (const [k, v] of m) {
+        res[k] = v;
+    }
+    return res;
+}
+
+const defaultSchema: Schemas = new Schemas()
+    .addSchema(Array, t => JsonSchema.arraySchema('Array of ' + String(t), t, r => r))
+    .addAlias(Array, [Array, AnyTy])
+    .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
+    .addSchema(null, JsonSchema.nullSchema('null', x => x))
+    .addSchema(Number, JsonSchema.numberSchema('number', x => x))
+    .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + String(t), _ => t, r => mapToObject(r)))
+    .addAlias(Object, [Object, AnyTy])
+    .addSchema(String, JsonSchema.stringSchema('string', x => x));
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
 export type TySpec = AnyTyTy | null | Constructor | [Constructor, TySpec];

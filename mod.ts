@@ -1,7 +1,8 @@
 export {
     AnyTy,
     JsonParser,
-    JsonSchema
+    JsonSchema,
+    Schemas
 } from "./src/json.ts";
 
 export type {

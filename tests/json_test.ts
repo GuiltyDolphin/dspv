@@ -9,6 +9,7 @@ import {
     JsonParser,
     JsonParseResult,
     JsonSchema,
+    Schemas,
     TySpec,
 } from '../mod.ts';
 
@@ -168,9 +169,9 @@ const basicSchema = JsonSchema.objectSchema<Basic>('Basic', {
     return new Basic(o.get('p'));
 });
 
-const basicSchemas = new Map();
+const basicSchemas = Schemas.emptySchemas();
 
-basicSchemas.set(Basic, basicSchema);
+basicSchemas.addSchema(Basic, basicSchema);
 
 const parserBasic = new JsonParser(basicSchemas);
 
@@ -194,9 +195,9 @@ const basic2Schema = JsonSchema.objectSchema<Basic2>('Basic2', {
     p: Basic,
 }, (o) => { return new Basic2(o.get('p')); });
 
-const basic2SchemaMap = new Map();
-basic2SchemaMap.set(Basic, basicSchema);
-basic2SchemaMap.set(Basic2, basic2Schema);
+const basic2SchemaMap = Schemas.emptySchemas();
+basic2SchemaMap.addSchema(Basic, basicSchema);
+basic2SchemaMap.addSchema(Basic2, basic2Schema);
 
 const basic2Parser = new JsonParser(basic2SchemaMap);
 
@@ -204,6 +205,31 @@ testGroup("parseAsOrThrow, with schema, Basic2",
     testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, is empty", `{"p": {}}`, Basic2, JsonParser.MissingKeysError, "missing keys: p"),
     testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, wrong type", `{"p": {"p": 1}}`, Basic2, JsonParser.JsonTypeError, "expected: boolean"),
     testParseAsOrThrowWithParser(basic2Parser, "ok", `{"p": {"p": true}}`, Basic2, new Basic2(new Basic(true))),
+).runAsMain();
+
+class MyArray<T> {
+    arr: T[];
+
+    constructor(arr: T[]) {
+        this.arr = arr;
+    }
+}
+
+const myArraySchemas = Schemas.emptySchemas();
+
+myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema('MyArray', t, r => new MyArray(r)));
+myArraySchemas.addSchema(Basic, basicSchema);
+const myArrayParser = new JsonParser(myArraySchemas);
+
+testGroup("parseAsOrThrow, with schema, MyArray",
+    new Test("item is not of the correct type", () => {
+        assertParseFailsWith(myArrayParser.parseAs('{"k":1}', MyArray), new JsonParser.JsonTypeError('MyArray', 'object', { k: 1 }))
+    }),
+    new Test("inner element is not of the correct type", () => {
+        assertParseFailsWith(myArrayParser.parseAs('[1]', [MyArray, Boolean]), new JsonParser.JsonTypeError('boolean', 'number', 1))
+    }),
+    testParseAsOrThrowWithParser(myArrayParser, "okay with array of boolean", "[true, false, true]", [MyArray, Boolean], new MyArray([true, false, true])),
+    testParseAsOrThrowWithParser(myArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [MyArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
 ).runAsMain();
 
 
@@ -230,7 +256,7 @@ testGroup("errors",
             assertParseFailsWith(basicParser.parseAs('1', Boolean), new JsonParser.JsonTypeError('boolean', 'number', 1))
         }),
         new Test("expected Empty but got number, correct error", () => {
-            assertParseFailsWith(new JsonParser(new Map().set(Empty, JsonSchema.objectSchema<Empty>('Empty', {
+            assertParseFailsWith(new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('Empty', {
             }, (_) => new Empty()))).parseAs(`1`, Empty), new JsonParser.JsonTypeError('Empty', 'number', 1))
         }),
         new Test("wrong field type, expected boolean but got number, correct error", () => {
@@ -242,7 +268,7 @@ testGroup("errors",
 
     new Test("missing keys", () => {
         assertParseFailsWith(
-            new JsonParser(new Map().set(Empty, JsonSchema.objectSchema<Empty>('missing keys test', {
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('missing keys test', {
                 p1: Boolean,
                 p2: Number,
                 p3: null
@@ -251,7 +277,7 @@ testGroup("errors",
 
     new Test("unknown keys", () => {
         assertParseFailsWith(
-            new JsonParser(new Map().set(Empty, JsonSchema.objectSchema<Empty>('unknown keys test', {
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown keys test', {
                 p2: Number,
             }, (_) => new Empty()))).parseAs(`{"p1": true, "p2": 1, "p3": null}`, Empty), new JsonParser.UnknownKeysError(['p1', 'p3']))
     }),
