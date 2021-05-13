@@ -38,6 +38,10 @@ class GenJsonValue<T extends JsonTypeName> {
         return this.value;
     }
 
+    toJsonString(): string {
+        return JSON.stringify(this.unwrapFully());
+    }
+
     isArray(): this is GenJsonValue<"array"> {
         return this.getType() === "array";
     }
@@ -185,7 +189,7 @@ export class JsonParser {
     /** Parse the JSON text as a member of the given type. */
     loadAs<T>(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
         const typeError: (d: string) => JsonParseResult<any> = (desc: string) => {
-            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv.unwrapFully()));
+            return JsonParser.failParse(new JsonParser.JsonTypeError(desc, 'unknown', jv));
         };
         const schema = this.schemas.get(cls);
         if (schema !== undefined) {
@@ -263,10 +267,13 @@ export class JsonParser {
     static JsonTypeError = class extends JsonParseError {
         private expected: string;
         private actualTy: string;
-        private value: any;
+        private value: JsonValue | JsonValueRaw;
 
-        constructor(expected: string, actualTy: string, value: any) {
-            super(`expected: ${expected}\nbut got: ${actualTy}: ${String(value)}`);
+        constructor(expected: string, actualTy: string, value: JsonValue | JsonValueRaw) {
+
+            const vstr = value instanceof GenJsonValue ? value.toJsonString() : JSON.stringify(value);
+            super(`expected: ${expected}\nbut got: ${actualTy}: ${vstr}`);
+
             this.expected = expected;
             this.actualTy = actualTy;
             this.value = value;
@@ -311,7 +318,7 @@ export class JsonSchema<T> {
     constructor(description: string, objectParser: Partial<JParser<T>>) {
         const failWith: <O extends JsonValue>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>(tyDesc: string) => {
             return (_parser: JsonParser, o: O) => {
-                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, String(o.unwrapFully())));
+                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, o));
             };
         };
         this.objectParser = {

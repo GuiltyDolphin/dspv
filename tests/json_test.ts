@@ -236,6 +236,8 @@ testGroup("errors",
         new Test("wrong field type, expected boolean but got number, correct error", () => {
             assertParseFailsWith(basicParser.parseAs(`{"p": 1}`, [Object, Boolean]), new JsonParser.JsonTypeError('boolean', 'number', 1))
         }),
+
+        testParseAsOrThrowFails("arrays are wrapped in brackets and have commas in error message", '[1, 2]', Boolean, JsonParser.JsonTypeError, "but got: array: [1,2]"),
     ),
 
     new Test("missing keys", () => {
