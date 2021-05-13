@@ -202,7 +202,7 @@ export class JsonParser {
                 return JsonParser.parseOk(jv.unwrapFully());
             }
         }
-        throw new Error(`NOT IMPLEMENTED: with value ${jv} on class ` + String(cls));
+        return JsonParser.failParse(new JsonParser.UnknownSpecError(cls));
     }
 
     /**
@@ -264,6 +264,15 @@ export class JsonParser {
         constructor(keys: string[]) {
             super('unknown keys: ' + keys.join(', '));
             this.keys = keys;
+        }
+    }
+
+    static UnknownSpecError = class extends JsonParseError {
+        private spec: TySpec;
+
+        constructor(spec: TySpec) {
+            super(`I don't know how to parse a value for the specification: ${String(spec)}`);
+            this.spec = spec;
         }
     }
 }

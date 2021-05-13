@@ -281,4 +281,27 @@ testGroup("errors",
                 p2: Number,
             }, (_) => new Empty()))).parseAs(`{"p1": true, "p2": 1, "p3": null}`, Empty), new JsonParser.UnknownKeysError(['p1', 'p3']))
     }),
+
+    testGroup("unknown spec",
+        new Test("top level", () => {
+            assertParseFailsWith(
+                new JsonParser().parseAs('1', Empty), new JsonParser.UnknownSpecError(Empty))
+        }),
+        new Test("in array", () => {
+            assertParseFailsWith(
+                new JsonParser().parseAs('[1]', [Array, Empty]), new JsonParser.UnknownSpecError(Empty))
+        }),
+        new Test("in other specification", () => {
+            assertParseFailsWith(
+                new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown spec test', {
+                    p1: Basic,
+                }, (_) => new Empty()))).parseAs(`{"p1": 1}`, Empty), new JsonParser.UnknownSpecError(Basic))
+        }),
+        new Test("nested", () => {
+            assertParseFailsWith(
+                new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown spec test', {
+                    p1: [Basic, Empty],
+                }, (_) => new Empty()))).parseAs(`{"p1": 1}`, Empty), new JsonParser.UnknownSpecError([Basic, Empty]))
+        }),
+    ),
 ).runAsMain();
