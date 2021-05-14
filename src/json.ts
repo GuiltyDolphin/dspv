@@ -1,5 +1,7 @@
 import { Either, Maybe } from './deps.ts';
 
+import { NestMap } from './util.ts';
+
 type GenJsonType<T> = {
     "array": T[],
     "boolean": boolean,
@@ -182,12 +184,12 @@ export class JsonParser {
     private schemas: Schemas;
 
     constructor(schemas?: Schemas, noDefault?: boolean) {
-        schemas = Schemas.mergeSchemas(noDefault ? Schemas.emptySchemas() : defaultSchema, schemas !== undefined ? schemas : Schemas.emptySchemas());
+        schemas = Schemas.mergeSchemas(noDefault ? Schemas.emptySchemas() : defaultSchema(), schemas !== undefined ? schemas : Schemas.emptySchemas());
         this.schemas = schemas;
     }
 
     /** Parse the JSON text as a member of the given type. */
-    loadAs<T>(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
+    loadAs(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
         const maybeSchema = this.schemas.getSchemaForSpec(cls);
         if (maybeSchema.isSome()) {
             const schema = maybeSchema.unwrap();
@@ -443,68 +445,71 @@ interface Constructor {
 export const AnyTy = Symbol("AnyTy");
 type AnyTyTy = typeof AnyTy;
 
+type NonEmptyList<T> = [T, ...T[]];
+
+type SchemaBuilder = (...args: TySpec[]) => JsonSchema<any>;
+
+type TySpecMap = NestMap<TySpecBase, SchemaBuilder>;
+
+function flattenTySpec(x: TySpec): NonEmptyList<TySpecBase> {
+    if (x instanceof Array) {
+        let [head, ...tail] = x;
+        const rs = tail.map(flattenTySpec).flat();
+        return [head, ...rs];
+    }
+    return [x];
+}
+
 export class Schemas {
-    private schemas: Map<TySpec, (...args: TySpec[]) => JsonSchema<any>>;
-    private aliases: Map<TySpec, TySpec>;
+    private schemas: TySpecMap;
+    private aliases: NestMap<TySpecBase, TySpec>;
 
     constructor() {
-        this.schemas = new Map();
-        this.aliases = new Map();
+        this.schemas = new NestMap();
+        this.aliases = new NestMap();
     }
 
     addAlias(spec: TySpec, alias: TySpec): Schemas {
-        this.aliases.set(spec, alias);
+        this.aliases.set(flattenTySpec(spec), alias);
         return this;
     }
 
     addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)): Schemas {
+        const s = flattenTySpec(spec);
         if (schema instanceof JsonSchema) {
-            this.schemas.set(spec, () => schema);
+            this.schemas.set(s, () => schema);
         } else {
-            this.schemas.set(spec, schema);
+            this.schemas.set(s, schema);
         }
         return this;
     }
 
     protected resolveAlias(spec: TySpec): TySpec {
-        const alias = this.aliases.get(spec);
-        if (alias === undefined) {
-            return spec;
-        }
-        return this.resolveAlias(alias);
+        const alias = this.aliases.get(flattenTySpec(spec));
+        return alias.maybe(spec, alias => this.resolveAlias(alias));
+    }
+
+    private mostSpecificSchema(spec: TySpec): Maybe<[SchemaBuilder, TySpec[]]> {
+        return this.schemas.getBestAndRest(flattenTySpec(spec));
     }
 
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
-        spec = this.resolveAlias(spec);
-        if (spec instanceof Array) {
-            const headSchema = this.schemas.get(spec[0]);
-            if (headSchema !== undefined) {
-                let [, ...rest] = spec;
-                return Maybe.some(headSchema(...rest));
-            } else {
-                return Maybe.none();
-            }
-        } else {
-            const schema = this.schemas.get(spec);
-            if (schema !== undefined) {
-                return Maybe.some(schema(spec));
-            }
-            return Maybe.none();
-        }
+        return this.mostSpecificSchema(this.resolveAlias(spec))
+            .map(([f, args]: [SchemaBuilder, TySpec[]]) => f(...args));
     }
 
-    protected getSchemaMap(): Map<TySpec, (...args: TySpec[]) => JsonSchema<any>> {
+    protected getSchemaMap(): TySpecMap {
         return this.schemas;
     }
 
-    protected getAliasMap(): Map<TySpec, TySpec> {
+    protected getAliasMap(): NestMap<TySpecBase, TySpec> {
         return this.aliases;
     }
 
     /** Merge with another schema, favouring definitions in the parameter schema. */
     protected mergeWith(schemas: Schemas) {
-        this.schemas = new Map([...this.schemas, ...schemas.getSchemaMap()]);
-        this.aliases = new Map([...this.aliases, ...schemas.getAliasMap()]);
+        this.schemas = new NestMap<TySpecBase, SchemaBuilder>().mergeWith(this.schemas).mergeWith(schemas.getSchemaMap());
+        this.aliases = new NestMap<TySpecBase, TySpec>().mergeWith(this.aliases).mergeWith(schemas.getAliasMap());
     }
 
     static emptySchemas(): Schemas {
@@ -527,15 +532,21 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
     return res;
 }
 
-const defaultSchema: Schemas = new Schemas()
-    .addSchema(Array, t => JsonSchema.arraySchema('Array of ' + String(t), t, r => r))
-    .addAlias(Array, [Array, AnyTy])
-    .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
-    .addSchema(null, JsonSchema.nullSchema('null', x => x))
-    .addSchema(Number, JsonSchema.numberSchema('number', x => x))
-    .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + String(t), _ => t, r => mapToObject(r)))
-    .addAlias(Object, [Object, AnyTy])
-    .addSchema(String, JsonSchema.stringSchema('string', x => x));
+function defaultSchema(): Schemas {
+    return Schemas.emptySchemas()
+        .addSchema(Array, (t) => JsonSchema.arraySchema('Array of ' + String(t), t, r => r))
+        .addAlias(Array, [Array, AnyTy])
+        .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
+        .addSchema([Map, String], t => JsonSchema.objectSchemaMap("Map with string keys", _ => t, r => r))
+        .addAlias(Map, [Map, String])
+        .addAlias([Map, String], [Map, String, AnyTy])
+        .addSchema(null, JsonSchema.nullSchema('null', x => x))
+        .addSchema(Number, JsonSchema.numberSchema('number', x => x))
+        .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + String(t), _ => t, r => mapToObject(r)))
+        .addAlias(Object, [Object, AnyTy])
+        .addSchema(String, JsonSchema.stringSchema('string', x => x));
+}
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
-export type TySpec = AnyTyTy | null | Constructor | [Constructor, TySpec];
+type TySpecBase = AnyTyTy | null | Constructor
+export type TySpec = TySpecBase | [TySpecBase, TySpec, ...TySpec[]];

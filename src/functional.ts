@@ -61,6 +61,10 @@ export class Maybe<T> implements Functor<T> {
     static fail<T>(): Maybe<T> {
         return Maybe.none();
     }
+
+    static join<T>(x: Maybe<Maybe<T>>): Maybe<T> {
+        return x.maybe(Maybe.none(), r => r);
+    }
 }
 
 export class Either<L, R> implements Functor<R> {
