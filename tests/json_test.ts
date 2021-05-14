@@ -85,9 +85,15 @@ const myArraySchemas = Schemas.emptySchemas();
 myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema('MyArray', t, r => new MyArray(r)));
 myArraySchemas.addSchema(Basic, basicSchema);
 
+const customArray = Symbol("customArray");
+const customArraySchemas = Schemas.emptySchemas();
+customArraySchemas.addSchema(customArray, (t: TySpec) => JsonSchema.arraySchema('custom array', t, r => new MyArray(r)));
+customArraySchemas.addSchema(Basic, basicSchema);
+
 const parserBasic = new JsonParser(basicSchemas);
 const basic2Parser = new JsonParser(basic2SchemaMap);
 const myArrayParser = new JsonParser(myArraySchemas);
+const customArrayParser = new JsonParser(customArraySchemas);
 
 testGroup("parseAsOrThrow",
     testGroup("array",
@@ -190,6 +196,17 @@ testGroup("parseAsOrThrow",
             }),
             testParseAsOrThrowWithParser(myArrayParser, "okay with array of boolean", "[true, false, true]", [MyArray, Boolean], new MyArray([true, false, true])),
             testParseAsOrThrowWithParser(myArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [MyArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
+        ),
+
+        testGroup("symbol to override array spec",
+            new Test("item is not of the correct type", () => {
+                assertParseFailsWith(customArrayParser, '{"k":1}', customArray, new JsonParser.JsonTypeError('custom array', 'object', { k: 1 }))
+            }),
+            new Test("inner element is not of the correct type", () => {
+                assertParseFailsWith(customArrayParser, '[1]', [customArray, Boolean], new JsonParser.JsonTypeError('boolean', 'number', 1))
+            }),
+            testParseAsOrThrowWithParser(customArrayParser, "okay with array of boolean", "[true, false, true]", [customArray, Boolean], new MyArray([true, false, true])),
+            testParseAsOrThrowWithParser(customArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [customArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
         ),
     ),
 ).runAsMain();

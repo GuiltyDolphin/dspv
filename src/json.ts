@@ -273,7 +273,7 @@ export class JsonParser {
         private spec: TySpec;
 
         constructor(spec: TySpec) {
-            super(`I don't know how to parse a value for the specification: ${String(spec)}`);
+            super(`I don't know how to parse a value for the specification: ${tySpecDescription(spec)}`);
             this.spec = spec;
         }
     }
@@ -443,7 +443,6 @@ interface Constructor {
 
 /** Represents values that can take any type. */
 export const AnyTy = Symbol("AnyTy");
-type AnyTyTy = typeof AnyTy;
 
 type NonEmptyList<T> = [T, ...T[]];
 
@@ -534,7 +533,7 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
 
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
-        .addSchema(Array, (t) => JsonSchema.arraySchema('Array of ' + String(t), t, r => r))
+        .addSchema(Array, (t) => JsonSchema.arraySchema('Array of ' + tySpecDescription(t), t, r => r))
         .addAlias(Array, [Array, AnyTy])
         .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
         .addSchema([Map, String], t => JsonSchema.objectSchemaMap("Map with string keys", _ => t, r => r))
@@ -542,11 +541,30 @@ function defaultSchema(): Schemas {
         .addAlias([Map, String], [Map, String, AnyTy])
         .addSchema(null, JsonSchema.nullSchema('null', x => x))
         .addSchema(Number, JsonSchema.numberSchema('number', x => x))
-        .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + String(t), _ => t, r => mapToObject(r)))
+        .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + tySpecDescription(t), _ => t, r => mapToObject(r)))
         .addAlias(Object, [Object, AnyTy])
         .addSchema(String, JsonSchema.stringSchema('string', x => x));
 }
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
-type TySpecBase = AnyTyTy | null | Constructor
+type TySpecBase = symbol | null | Constructor
 export type TySpec = TySpecBase | [TySpecBase, TySpec, ...TySpec[]];
+
+function tySpecBaseDescription(t: TySpecBase): string {
+    if (typeof t === 'symbol') {
+        return t.toString();
+    }
+    if (t === null) {
+        return 'null'
+    }
+    return t.name;
+}
+
+function tySpecDescription(t: TySpec): string {
+    if (t instanceof Array) {
+        let [head, ...rest] = t;
+        return `[${[tySpecBaseDescription(head), ...rest.map(tySpecDescription)].join(', ')}]`;
+    } else {
+        return tySpecBaseDescription(t);
+    }
+}
