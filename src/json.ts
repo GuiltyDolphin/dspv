@@ -171,9 +171,94 @@ function parse(text: string): Either<string, JsonValue> {
     return toJsonValue(JSON.parse(text));
 }
 
-class JsonParseError extends Error {
-    constructor(message: string) {
-        super(message);
+class ParseContext {
+    parentContext: Maybe<ParseContext>;
+
+    private constructor(parent?: ParseContext) {
+        if (parent === undefined) {
+            this.parentContext = Maybe.none();
+        } else {
+            this.parentContext = Maybe.some(parent);
+        }
+    }
+
+    renderFull(): string {
+        return (this.parentContext.maybe("", c => c.renderFull()) + "\n" + this.renderThis()).trim();
+    }
+
+    protected renderThis(): string {
+        return "";
+    }
+
+    getParentContext(): Maybe<ParseContext> {
+        return this.parentContext;
+    }
+
+    /** The active context when just starting a parse. */
+    static topLevelContext() {
+        return new ParseContext();
+    }
+
+    static readingValueForSpec(parent: ParseContext, schemas: Schemas, spec: TySpec): ParseContext {
+        return new ParseContext.ReadingValueForSpec(parent, schemas, spec);
+    }
+
+    static seenValue(parent: ParseContext, value: JsonValue): ParseContext {
+        return new ParseContext.SeenValue(parent, value);
+    }
+
+    static keyEntered(parent: ParseContext, key: string): ParseContext {
+        return new ParseContext.KeyEntered(parent, key);
+    }
+
+    private static ReadingValueForSpec = class extends ParseContext {
+        private spec: TySpec;
+        private schemas: Schemas;
+
+        constructor(parent: ParseContext, schemas: Schemas, spec: TySpec) {
+            super(parent);
+            this.spec = spec;
+            this.schemas = schemas;
+        }
+
+        renderThis(): string {
+            return "When trying to read a value for specification: " + this.schemas.getDescription(this.spec);
+        }
+    }
+
+    private static SeenValue = class extends ParseContext {
+        private value: JsonValue;
+
+        constructor(parent: ParseContext, value: JsonValue) {
+            super(parent);
+            this.value = value;
+        }
+
+        renderThis(): string {
+            return "I saw: " + this.value.toJsonString();
+        }
+    }
+
+    private static KeyEntered = class extends ParseContext {
+        private key: string;
+
+        constructor(parent: ParseContext, key: string) {
+            super(parent);
+            this.key = key;
+        }
+
+        renderThis(): string {
+            return "In key: " + JSON.stringify(this.key);
+        }
+    }
+}
+
+export class JsonParseError extends Error {
+    protected context: ParseContext;
+
+    constructor(context: ParseContext, message: string) {
+        super(`${context.renderFull()}\n${message}`);
+        this.context = context;
     }
 }
 
@@ -182,20 +267,107 @@ export type JsonParseResult<T> = Either<JsonParseError, T>;
 export class JsonParser {
 
     private schemas: Schemas;
+    private context: Maybe<ParseContext>;
 
     constructor(schemas?: Schemas, noDefault?: boolean) {
         schemas = Schemas.mergeSchemas(noDefault ? Schemas.emptySchemas() : defaultSchema(), schemas !== undefined ? schemas : Schemas.emptySchemas());
         this.schemas = schemas;
+        this.context = Maybe.none();
+    }
+
+    private updateContext(f: (c: ParseContext) => ParseContext) {
+        this.context = Maybe.some(f(this.checkParsingOrFail()));
+    }
+
+    private tryingToLoadValueForSpec(spec: TySpec) {
+        this.updateContext(c => ParseContext.readingValueForSpec(c, this.schemas, spec));
+    }
+
+    private seenValue(value: JsonValue) {
+        this.updateContext(c => ParseContext.seenValue(c, value));
+    }
+
+    private contextEnterKey(k: string) {
+        this.updateContext(c => ParseContext.keyEntered(c, k));
+    }
+
+    _getDescriptionForSpec(spec: TySpec): string {
+        return this.schemas.getDescription(spec);
+    }
+
+    private contextPop() {
+        this.context = Maybe.join(this.context.map(c => c.getParentContext()));
+    }
+
+    /**
+     * Parse the JSON text as a member of the given type. Intended to
+     * be used when parsing a value that belongs to an object key.
+     */
+    loadKeyAs(k: string, jv: JsonValue, spec: TySpec): JsonParseResult<any> {
+        this.contextEnterKey(k);
+        const res = this.loadAs(jv, spec);
+        this.contextPop();
+        return res;
     }
 
     /** Parse the JSON text as a member of the given type. */
     loadAs(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
+        this.tryingToLoadValueForSpec(cls);
+        this.seenValue(jv);
         const maybeSchema = this.schemas.getSchemaForSpec(cls);
         if (maybeSchema.isSome()) {
             const schema = maybeSchema.unwrap();
-            return schema.on(this, jv);
+            const res = schema.on(this, jv);
+            this.contextPop();
+            this.contextPop();
+            return res;
         }
-        return JsonParser.failParse(new JsonParser.UnknownSpecError(cls));
+        return this.failWithUnknownSpec(cls);
+    }
+
+    checkParsingOrFail(): ParseContext | never {
+        return this.context.maybef(() => { throw new Error("FATAL: tried to retrieve context when not parsing.") }, r => r);
+    }
+
+    failWithMissingKeys<T>(missingKeys: string[]): JsonParseResult<T> {
+        const context = this.checkParsingOrFail();
+        return JsonParser.failParse(new JsonParser.MissingKeysError(context, missingKeys));
+    }
+
+    failWithTypeError<T>(actualTyDesc: string, o: JsonValue): JsonParseResult<T> {
+        const context = this.checkParsingOrFail();
+        return JsonParser.failParse(new JsonParser.JsonTypeError(context, actualTyDesc, o));
+    }
+
+    failWithUnknownKeys<T>(unknownKeys: string[]): JsonParseResult<T> {
+        const context = this.checkParsingOrFail();
+        return JsonParser.failParse(new JsonParser.UnknownKeysError(context, unknownKeys));
+    }
+
+    failWithUnknownSpec<T>(spec: TySpec): JsonParseResult<T> {
+        const context = this.checkParsingOrFail();
+        return JsonParser.failParse(new JsonParser.UnknownSpecError(context, spec));
+    }
+
+    private initialiseForParsing() {
+        this.context = Maybe.some(ParseContext.topLevelContext());
+    }
+
+    private cleanupAfterParsing() {
+        this.context = Maybe.none();
+    }
+
+    private withSetupCleanUp<T>(f: () => T): T {
+        this.initialiseForParsing();
+        let res;
+        try {
+            res = f();
+        } catch (e) {
+            throw e;
+        } finally {
+            this.cleanupAfterParsing();
+        }
+        return res;
     }
 
     /**
@@ -204,12 +376,16 @@ export class JsonParser {
      * Similar to {@link parseAs}, but throw any resulting exception immediately.
      */
     parseAsOrThrow(text: string, cls: TySpec): any {
-        return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
+        return this.withSetupCleanUp(() => {
+            return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
+        });
     }
 
     /** Parse the JSON text as a member of the given type. */
     parseAs(text: string, cls: TySpec): any {
-        return parse(text).mapCollecting(v => this.loadAs(v, cls));
+        return this.withSetupCleanUp(() => {
+            return parse(text).mapCollecting(v => this.loadAs(v, cls));
+        });
     }
 
     static failParse<T>(err: JsonParseError): JsonParseResult<T> {
@@ -220,23 +396,15 @@ export class JsonParser {
         return Either.pure(x);
     }
 
-    static FieldTypeMismatch = class extends JsonParseError {
-        constructor(message: string) {
-            super(message);
-        }
-    }
-
     static JsonTypeError = class extends JsonParseError {
-        private expected: string;
         private actualTy: string;
-        private value: JsonValue | JsonValueRaw;
+        private value: JsonValue;
 
-        constructor(expected: string, actualTy: string, value: JsonValue | JsonValueRaw) {
+        constructor(context: ParseContext, actualTy: string, value: JsonValue) {
 
             const vstr = value instanceof GenJsonValue ? value.toJsonString() : JSON.stringify(value);
-            super(`expected: ${expected}\nbut got: ${actualTy}: ${vstr}`);
+            super(context, `But this is a ${actualTy}`);
 
-            this.expected = expected;
             this.actualTy = actualTy;
             this.value = value;
         }
@@ -245,8 +413,8 @@ export class JsonParser {
     static MissingKeysError = class extends JsonParseError {
         private keys: string[];
 
-        constructor(keys: string[]) {
-            super('missing keys: ' + keys.join(', '));
+        constructor(context: ParseContext, keys: string[]) {
+            super(context, `But the following keys are required and were not specified: ${keys.map(k => JSON.stringify(k)).join(', ')}`);
             this.keys = keys;
         }
     }
@@ -254,8 +422,8 @@ export class JsonParser {
     static UnknownKeysError = class extends JsonParseError {
         private keys: string[];
 
-        constructor(keys: string[]) {
-            super('unknown keys: ' + keys.join(', '));
+        constructor(context: ParseContext, keys: string[]) {
+            super(context, `But I saw the following keys which are not accepted by the specification: ${keys.map(k => JSON.stringify(k)).join(', ')}`);
             this.keys = keys;
         }
     }
@@ -263,8 +431,8 @@ export class JsonParser {
     static UnknownSpecError = class extends JsonParseError {
         private spec: TySpec;
 
-        constructor(spec: TySpec) {
-            super(`I don't know how to parse a value for the specification: ${tySpecDescription(spec)}`);
+        constructor(context: ParseContext, spec: TySpec) {
+            super(context, `But I don't know how to parse a value for the specification: ${tySpecDescription(spec)}`);
             this.spec = spec;
         }
     }
@@ -284,12 +452,11 @@ type JParser<T> = {
 /** Schema that specifies how to load a specific class from JSON. */
 export class JsonSchema<T> {
     private objectParser: JParser<T>;
-    private description: string;
 
-    constructor(description: string, objectParser: Partial<JParser<T>>) {
+    constructor(objectParser: Partial<JParser<T>>) {
         const failWith: <O extends JsonValue>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>(tyDesc: string) => {
-            return (_parser: JsonParser, o: O) => {
-                return JsonParser.failParse(new JsonParser.JsonTypeError(this.getDescription(), tyDesc, o));
+            return (parser: JsonParser, o: O) => {
+                return parser.failWithTypeError(tyDesc, o);
             };
         };
         this.objectParser = {
@@ -301,7 +468,6 @@ export class JsonSchema<T> {
             onString: failWith('string'),
             ...objectParser
         };
-        this.description = description;
     }
 
     static genArraySchema<T>(eltSpec: TySpec, onRes: (x: any[]) => T): JParser<T>['onArray'] {
@@ -319,8 +485,8 @@ export class JsonSchema<T> {
         }
     }
 
-    static arraySchema<T>(desc: string, eltSpec: TySpec, onRes: (x: any[]) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static arraySchema<T>(eltSpec: TySpec, onRes: (x: any[]) => T): JsonSchema<T> {
+        return new JsonSchema({
             onArray: JsonSchema.genArraySchema(eltSpec, onRes),
         });
     }
@@ -331,8 +497,8 @@ export class JsonSchema<T> {
         }
     }
 
-    static booleanSchema<T>(desc: string, onRes: (x: boolean) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static booleanSchema<T>(onRes: (x: boolean) => T): JsonSchema<T> {
+        return new JsonSchema({
             onBoolean: JsonSchema.genBooleanSchema(onRes)
         });
     }
@@ -343,8 +509,8 @@ export class JsonSchema<T> {
         }
     }
 
-    static nullSchema<T>(desc: string, onRes: (x: null) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static nullSchema<T>(onRes: (x: null) => T): JsonSchema<T> {
+        return new JsonSchema({
             onNull: JsonSchema.genNullSchema(onRes)
         });
     }
@@ -355,8 +521,8 @@ export class JsonSchema<T> {
         }
     }
 
-    static numberSchema<T>(desc: string, onRes: (x: number) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static numberSchema<T>(onRes: (x: number) => T): JsonSchema<T> {
+        return new JsonSchema({
             onNumber: JsonSchema.genNumberSchema(onRes)
         });
     }
@@ -366,7 +532,7 @@ export class JsonSchema<T> {
             const res = new Map<string, any>();
             const obj = json.unwrap();
             for (const k in obj) {
-                const v = parser.loadAs(obj[k], kfun(k));
+                const v = parser.loadKeyAs(k, obj[k], kfun(k));
                 if (v.isLeft()) {
                     return v.propLeft();
                 }
@@ -376,14 +542,14 @@ export class JsonSchema<T> {
         }
     }
 
-    static objectSchemaMap<T>(desc: string, kfun: (k: string) => TySpec, onRes: (x: Map<string, any>) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static objectSchemaMap<T>(kfun: (k: string) => TySpec, onRes: (x: Map<string, any>) => T): JsonSchema<T> {
+        return new JsonSchema({
             onObject: JsonSchema.genObjectMapSchema(kfun, onRes),
         });
     }
 
-    static objectSchema<T>(desc: string, ks: StringKeyed<TySpec>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static objectSchema<T>(ks: StringKeyed<TySpec>, onRes: (x: StringKeyed<any>) => T): JsonSchema<T> {
+        return new JsonSchema({
             onObject(parser: JsonParser, json: JsonObject): JsonParseResult<T> {
                 const unreadKeys = new Set<string>();
                 const missedKeys = new Set<string>();
@@ -407,10 +573,10 @@ export class JsonSchema<T> {
                     }
                 }
                 if (unreadKeys.size > 0) {
-                    return JsonParser.failParse(new JsonParser.UnknownKeysError(Array.from(unreadKeys.values())));
+                    return parser.failWithUnknownKeys(Array.from(unreadKeys.values()));
                 }
                 if (missedKeys.size > 0) {
-                    return JsonParser.failParse(new JsonParser.MissingKeysError(Array.from(missedKeys.values())));
+                    return parser.failWithMissingKeys(Array.from(missedKeys.values()));
                 }
                 return JsonParser.parseOk(onRes(res));
             }
@@ -423,20 +589,15 @@ export class JsonSchema<T> {
         }
     }
 
-    static stringSchema<T>(desc: string, onRes: (x: string) => T): JsonSchema<T> {
-        return new JsonSchema(desc, {
+    static stringSchema<T>(onRes: (x: string) => T): JsonSchema<T> {
+        return new JsonSchema({
             onString: JsonSchema.genStringSchema(onRes)
         });
     }
 
-    static customSchema<T>(desc: string, specs: Partial<JParser<T>>): JsonSchema<T> {
-        return new JsonSchema(desc, specs);
+    static customSchema<T>(specs: Partial<JParser<T>>): JsonSchema<T> {
+        return new JsonSchema(specs);
     }
-
-    /** Get a human-readable description of what the schema parses. */
-    getDescription() {
-        return this.description;
-    };
 
     on(parser: JsonParser, o: JsonValue): JsonParseResult<T> {
         if (o.isArray()) {
@@ -469,6 +630,8 @@ type SchemaBuilder = (...args: TySpec[]) => JsonSchema<any>;
 
 type TySpecMap = NestMap<TySpecBase, SchemaBuilder>;
 
+type DescriptionFn = (...args: TySpec[]) => string;
+
 function flattenTySpec(x: TySpec): NonEmptyList<TySpecBase> {
     if (x instanceof Array) {
         let [head, ...tail] = x;
@@ -481,10 +644,12 @@ function flattenTySpec(x: TySpec): NonEmptyList<TySpecBase> {
 export class Schemas {
     private schemas: TySpecMap;
     private aliases: NestMap<TySpecBase, TySpec>;
+    private descriptions: NestMap<TySpecBase, DescriptionFn>;
 
     constructor() {
         this.schemas = new NestMap();
         this.aliases = new NestMap();
+        this.descriptions = new NestMap();
     }
 
     addAlias(spec: TySpec, alias: TySpec): Schemas {
@@ -498,6 +663,22 @@ export class Schemas {
             this.schemas.set(s, () => schema);
         } else {
             this.schemas.set(s, schema);
+        }
+        return this;
+    }
+
+    /**
+     * Add a description for the given specification.
+     *
+     * The description may either be a string, or a function that takes a
+     * rendering function and a list of specifications, and produces a string.
+     */
+    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string, ...args: TySpec[]) => string)): Schemas {
+        const s = flattenTySpec(spec);
+        if (typeof description === 'string') {
+            this.descriptions.set(s, () => description);
+        } else {
+            this.descriptions.set(s, (...args) => description((t) => this.getDescription(t), ...args));
         }
         return this;
     }
@@ -516,6 +697,16 @@ export class Schemas {
             .map(([f, args]: [SchemaBuilder, TySpec[]]) => f(...args));
     }
 
+    getDescription(spec: TySpec, ...tys: TySpec[]): string {
+        return this.getDescriptionMap().get(flattenTySpec(this.resolveAlias(spec))).maybef(() => {
+            if (spec instanceof Array) {
+                return `[${spec.map(t => this.getDescription(t)).join(', ')}]`;
+            } else {
+                return tySpecBaseDescription(spec);
+            }
+        }, c => c(...tys));
+    }
+
     protected getSchemaMap(): TySpecMap {
         return this.schemas;
     }
@@ -524,10 +715,15 @@ export class Schemas {
         return this.aliases;
     }
 
+    protected getDescriptionMap(): NestMap<TySpecBase, DescriptionFn> {
+        return this.descriptions;
+    }
+
     /** Merge with another schema, favouring definitions in the parameter schema. */
     protected mergeWith(schemas: Schemas) {
         this.schemas = new NestMap<TySpecBase, SchemaBuilder>().mergeWith(this.schemas).mergeWith(schemas.getSchemaMap());
         this.aliases = new NestMap<TySpecBase, TySpec>().mergeWith(this.aliases).mergeWith(schemas.getAliasMap());
+        this.descriptions = new NestMap<TySpecBase, DescriptionFn>().mergeWith(this.getDescriptionMap()).mergeWith(schemas.getDescriptionMap());
     }
 
     static emptySchemas(): Schemas {
@@ -552,7 +748,7 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
 
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
-        .addSchema(AnyTy, JsonSchema.customSchema('anything', {
+        .addSchema(AnyTy, JsonSchema.customSchema({
             onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
             onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),
             onNull: JsonSchema.genNullSchema(t => t),
@@ -560,17 +756,25 @@ function defaultSchema(): Schemas {
             onObject: JsonSchema.genObjectMapSchema(_ => AnyTy, r => mapToObject<JsonValueRaw>(r)),
             onString: JsonSchema.genStringSchema(s => s),
         }))
-        .addSchema(Array, (t) => JsonSchema.arraySchema('Array of ' + tySpecDescription(t), t, r => r))
+        .addDescription(AnyTy, 'anything')
+        .addSchema(Array, (t) => JsonSchema.arraySchema(t, r => r))
+        .addDescription(Array, (getDesc, t) => 'Array of ' + getDesc(t))
         .addAlias(Array, [Array, AnyTy])
-        .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
-        .addSchema([Map, String], t => JsonSchema.objectSchemaMap("Map with string keys", _ => t, r => r))
+        .addSchema(Boolean, JsonSchema.booleanSchema(x => x))
+        .addDescription(Boolean, 'boolean')
+        .addSchema([Map, String], t => JsonSchema.objectSchemaMap(_ => t, r => r))
+        .addDescription([Map, String], (getDesc, t) => "Map with string keys and values matching " + getDesc(t))
         .addAlias(Map, [Map, String])
         .addAlias([Map, String], [Map, String, AnyTy])
-        .addSchema(null, JsonSchema.nullSchema('null', x => x))
-        .addSchema(Number, JsonSchema.numberSchema('number', x => x))
-        .addSchema(Object, t => JsonSchema.objectSchemaMap('Object whose values are ' + tySpecDescription(t), _ => t, r => mapToObject(r)))
+        .addSchema(null, JsonSchema.nullSchema(x => x))
+        .addDescription(null, 'null')
+        .addSchema(Number, JsonSchema.numberSchema(x => x))
+        .addDescription(Number, 'number')
+        .addSchema(Object, t => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)))
+        .addDescription(Object, (getDesc, t) => 'Object whose values are ' + getDesc(t))
         .addAlias(Object, [Object, AnyTy])
-        .addSchema(String, JsonSchema.stringSchema('string', x => x));
+        .addSchema(String, JsonSchema.stringSchema(x => x))
+        .addDescription(String, 'string');
 }
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */

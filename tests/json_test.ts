@@ -1,6 +1,7 @@
 import {
     assert,
     assertEquals,
+    assertStringIncludes,
     assertThrows,
     Test,
     testGroup,
@@ -8,6 +9,7 @@ import {
 
 import {
     AnyTy,
+    JsonParseError,
     JsonParser,
     JsonSchema,
     Schemas,
@@ -22,9 +24,13 @@ function testParseAsOrThrowWithParser(parser: JsonParser, innerDesc: string, toP
     });
 }
 
-function testParseAsOrThrowFailsWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
+function testParseAsOrThrowFailsWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string, exactMatch?: boolean): Test {
     return new Test(innerDesc, () => {
-        assertThrows(() => parser.parseAsOrThrow(toParse, ty), errTy, msgIncludes);
+        const matchStr = msgIncludes !== undefined ? msgIncludes.trim() : undefined;
+        const err = assertThrows(() => parser.parseAsOrThrow(toParse, ty), errTy, matchStr);
+        if (exactMatch && matchStr !== undefined) {
+            assertEquals(err.message, matchStr);
+        }
     });
 }
 
@@ -32,12 +38,12 @@ function testParseAsOrThrow(innerDesc: string, toParse: string, ty: TySpec, expe
     return testParseAsOrThrowWithParser(basicParser, innerDesc, toParse, ty, expected);
 }
 
-function testParseAsOrThrowFails(innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string): Test {
-    return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, errTy, msgIncludes);
+function testParseAsOrThrowFails(innerDesc: string, toParse: string, ty: TySpec, errTy: { new(...args: any[]): any }, msgIncludes?: string, exactMatch?: boolean): Test {
+    return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, errTy, msgIncludes, exactMatch);
 }
 
-function testParseAsOrThrowFailsWithTypeError(innerDesc: string, toParse: string, ty: TySpec, msgIncludes?: string): Test {
-    return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, JsonParser.JsonTypeError, msgIncludes);
+function testParseAsOrThrowFailsWithTypeError(innerDesc: string, toParse: string, ty: TySpec, msgIncludes?: string, exactMatch?: boolean): Test {
+    return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, JsonParser.JsonTypeError, msgIncludes, exactMatch);
 }
 
 class Basic {
@@ -56,13 +62,13 @@ class Basic2 {
     }
 }
 
-const basicSchema = JsonSchema.objectSchema<Basic>('Basic', {
+const basicSchema = JsonSchema.objectSchema<Basic>({
     'p': Boolean
 }, (o) => {
     return new Basic(o.get('p'));
 });
 
-const basic2Schema = JsonSchema.objectSchema<Basic2>('Basic2', {
+const basic2Schema = JsonSchema.objectSchema<Basic2>({
     p: Basic,
 }, (o) => { return new Basic2(o.get('p')); });
 
@@ -82,12 +88,13 @@ basic2SchemaMap.addSchema(Basic, basicSchema);
 basic2SchemaMap.addSchema(Basic2, basic2Schema);
 
 const myArraySchemas = Schemas.emptySchemas();
-myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema('MyArray', t, r => new MyArray(r)));
+myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
 myArraySchemas.addSchema(Basic, basicSchema);
 
 const customArray = Symbol("customArray");
 const customArraySchemas = Schemas.emptySchemas();
-customArraySchemas.addSchema(customArray, (t: TySpec) => JsonSchema.arraySchema('custom array', t, r => new MyArray(r)));
+customArraySchemas.addSchema(customArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
+customArraySchemas.addDescription(customArray, 'custom array');
 customArraySchemas.addSchema(Basic, basicSchema);
 
 const parserBasic = new JsonParser(basicSchemas);
@@ -182,35 +189,27 @@ testGroup("parseAsOrThrow",
     testGroup("with schema",
         testGroup("Basic",
             testParseAsOrThrowWithParser(parserBasic, "ok", `{"p": true}`, Basic, new Basic(true)),
-            testParseAsOrThrowFailsWithParser(parserBasic, "missing key", `{}`, Basic, JsonParser.MissingKeysError, "missing keys: p"),
-            testParseAsOrThrowFailsWithParser(parserBasic, "extra key", `{"p": true, "q": 1}`, Basic, JsonParser.UnknownKeysError, "unknown keys: q"),
+            assertParseFailsWithMissingKeys("missing key", parserBasic, `{}`, Basic, ["p"]),
+            assertParseFailsWithUnknownKeys("extra key", parserBasic, `{"p": true, "q": 1}`, Basic, ["q"]),
             testParseAsOrThrowFailsWithParser(parserBasic, "Basic, not on an object", '7', Basic, JsonParser.JsonTypeError),
         ),
 
         testGroup("Basic2",
-            testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, is empty", `{"p": {}}`, Basic2, JsonParser.MissingKeysError, "missing keys: p"),
-            testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, wrong type", `{"p": {"p": 1}}`, Basic2, JsonParser.JsonTypeError, "expected: boolean"),
+            assertParseFailsWithMissingKeys("inner item does not match Basic, is empty", basic2Parser, `{"p": {}}`, Basic2, ["p"]),
+            assertParseFailsWithTypeError("inner item does not match Basic, wrong type", basic2Parser, `{"p": {"p": 1}}`, Basic2, Boolean, 'number', 1),
             testParseAsOrThrowWithParser(basic2Parser, "ok", `{"p": {"p": true}}`, Basic2, new Basic2(new Basic(true))),
         ),
 
         testGroup("MyArray",
-            new Test("item is not of the correct type", () => {
-                assertParseFailsWith(myArrayParser, '{"k":1}', MyArray, new JsonParser.JsonTypeError('MyArray', 'object', { k: 1 }))
-            }),
-            new Test("inner element is not of the correct type", () => {
-                assertParseFailsWith(myArrayParser, '[1]', [MyArray, Boolean], new JsonParser.JsonTypeError('boolean', 'number', 1))
-            }),
+            assertParseFailsWithTypeError("item is not of the correct type", myArrayParser, '{"k":1}', MyArray, MyArray, 'object', { k: 1 }),
+            assertParseFailsWithTypeError("inner element is not of the correct type", myArrayParser, '[1]', [MyArray, Boolean], Boolean, 'number', 1),
             testParseAsOrThrowWithParser(myArrayParser, "okay with array of boolean", "[true, false, true]", [MyArray, Boolean], new MyArray([true, false, true])),
             testParseAsOrThrowWithParser(myArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [MyArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
         ),
 
         testGroup("symbol to override array spec",
-            new Test("item is not of the correct type", () => {
-                assertParseFailsWith(customArrayParser, '{"k":1}', customArray, new JsonParser.JsonTypeError('custom array', 'object', { k: 1 }))
-            }),
-            new Test("inner element is not of the correct type", () => {
-                assertParseFailsWith(customArrayParser, '[1]', [customArray, Boolean], new JsonParser.JsonTypeError('boolean', 'number', 1))
-            }),
+            assertParseFailsWithTypeError("item is not of the correct type", customArrayParser, '{"k":1}', customArray, customArray, 'object', { k: 1 }),
+            assertParseFailsWithTypeError("inner element is not of the correct type", customArrayParser, '[1]', [customArray, Boolean], Boolean, 'number', 1),
             testParseAsOrThrowWithParser(customArrayParser, "okay with array of boolean", "[true, false, true]", [customArray, Boolean], new MyArray([true, false, true])),
             testParseAsOrThrowWithParser(customArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [customArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
         ),
@@ -230,20 +229,37 @@ function assertParseFailsWithClass(parser: JsonParser, toParse: string, spec: Ty
     return actual;
 }
 
-function assertParseFailsWith(parser: JsonParser, toParse: string, spec: TySpec, expected: Error): void {
-    const actual = assertParseFailsWithClass(parser, toParse, spec, expected.constructor);
-    assertEquals(actual.unwrapLeft().message, expected.message);
+function assertParseFailsWith(parser: JsonParser, toParse: string, spec: TySpec, errTy: { new(...args: any[]): JsonParseError }, msgIncludes: string): void {
+    const actual = assertParseFailsWithClass(parser, toParse, spec, errTy);
+    assertStringIncludes(actual.unwrapLeft().message, msgIncludes);
 }
 
-function assertParseFailsWithTypeError(description: string, parser: JsonParser, toParse: string, spec: TySpec, expectedTy: string, actualTy: string, value: any) {
+function assertParseFailsWithMissingKeys(description: string, parser: JsonParser, toParse: string, spec: TySpec, keys: string[]) {
     return new Test(description, () => {
-        assertParseFailsWith(parser, toParse, spec, new JsonParser.JsonTypeError(expectedTy, actualTy, value))
+        assertParseFailsWith(parser, toParse, spec, JsonParser.MissingKeysError, `
+But the following keys are required and were not specified: ${keys.map(k => JSON.stringify(k)).join(', ')}`)
     });
 }
 
-function assertParseFailsWithUnknownSpec(description: string, parser: JsonParser, toParse: string, spec: TySpec, unknownSpec: TySpec) {
+function assertParseFailsWithTypeError(description: string, parser: JsonParser, toParse: string, spec: TySpec, expectedTy: TySpec, actualTy: string, value: any) {
     return new Test(description, () => {
-        assertParseFailsWith(parser, toParse, spec, new JsonParser.UnknownSpecError(unknownSpec))
+        assertParseFailsWith(parser, toParse, spec, JsonParser.JsonTypeError,
+            `When trying to read a value for specification: ${parser._getDescriptionForSpec(expectedTy)}
+I saw: ${JSON.stringify(value)}
+But this is a ${actualTy}`)
+    });
+}
+
+function assertParseFailsWithUnknownKeys(description: string, parser: JsonParser, toParse: string, spec: TySpec, keys: string[]) {
+    return new Test(description, () => {
+        assertParseFailsWith(parser, toParse, spec, JsonParser.UnknownKeysError, `
+But I saw the following keys which are not accepted by the specification: ${keys.map(k => JSON.stringify(k)).join(', ')}`)
+    });
+}
+
+function assertParseFailsWithUnknownSpec(description: string, parser: JsonParser, toParse: string, spec: TySpec, unknownSpecDescription: string) {
+    return new Test(description, () => {
+        assertParseFailsWith(parser, toParse, spec, JsonParser.UnknownSpecError, `But I don't know how to parse a value for the specification: ${unknownSpecDescription}`)
     });
 }
 
@@ -251,41 +267,80 @@ class Empty { }
 
 testGroup("errors",
     testGroup("type error",
-        assertParseFailsWithTypeError("expected boolean but got number, correct error", basicParser, '1', Boolean, 'boolean', 'number', 1),
+        assertParseFailsWithTypeError("expected boolean but got number, correct error", basicParser, '1', Boolean, Boolean, 'number', 1),
         assertParseFailsWithTypeError("expected Empty but got number, correct error",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('Empty', {
-            }, (_) => new Empty()))), `1`, Empty, 'Empty', 'number', 1),
-        assertParseFailsWithTypeError("wrong field type, expected boolean but got number, correct error", basicParser, `{"p": 1}`, [Object, Boolean], 'boolean', 'number', 1),
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
+            }, (_) => new Empty()))), `1`, Empty, Empty, 'number', 1),
+        assertParseFailsWithTypeError("wrong field type, expected boolean but got number, correct error", basicParser, `{ "p": 1 }`, [Object, Boolean], Boolean, 'number', 1),
 
-        testParseAsOrThrowFails("arrays are wrapped in brackets and have commas in error message", '[1, 2]', Boolean, JsonParser.JsonTypeError, "but got: array: [1,2]"),
+        testParseAsOrThrowFails("arrays are wrapped in brackets and have commas in error message", '[1, 2]', Boolean, JsonParser.JsonTypeError, "I saw: [1,2]"),
+
+        testParseAsOrThrowFails("correct string for simple error", '1', Boolean, JsonParser.JsonTypeError, `
+When trying to read a value for specification: boolean
+I saw: 1
+But this is a number
+`, true),
+        testParseAsOrThrowFails("correct string for slightly complex error", '{"p": true}', [Object, Number], JsonParser.JsonTypeError, `
+When trying to read a value for specification: [Object, number]
+I saw: {"p":true}
+In key: "p"
+When trying to read a value for specification: number
+I saw: true
+But this is a boolean
+`, true),
     ),
 
-    new Test("missing keys", () => {
-        assertParseFailsWith(
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('missing keys test', {
+    testGroup("missing keys",
+        assertParseFailsWithMissingKeys("correct error",
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
                 p1: Boolean,
                 p2: Number,
                 p3: null
-            }, (_) => new Empty()))), `{"p2": 1}`, Empty, new JsonParser.MissingKeysError(['p1', 'p3']))
-    }),
+            }, (_) => new Empty()))), `{ "p2": 1 } `, Empty, ['p1', 'p3']),
 
-    new Test("unknown keys", () => {
-        assertParseFailsWith(
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown keys test', {
+        testParseAsOrThrowFailsWithParser(
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
+                p1: Boolean,
                 p2: Number,
-            }, (_) => new Empty()))), `{"p1": true, "p2": 1, "p3": null}`, Empty, new JsonParser.UnknownKeysError(['p1', 'p3']))
-    }),
+                p3: null
+            }, (_) => new Empty()))), "correct string for error", `{ "p2": 1 }`, Empty, JsonParser.MissingKeysError, `
+When trying to read a value for specification: Empty
+I saw: {"p2":1}
+But the following keys are required and were not specified: "p1", "p3"
+`, true),
+    ),
+
+    testGroup("unknown keys",
+        assertParseFailsWithUnknownKeys("correct error",
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
+                p2: Number,
+            }, (_) => new Empty()))), `{ "p1": true, "p2": 1, "p3": null } `, Empty, ['p1', 'p3']),
+
+        testParseAsOrThrowFailsWithParser(
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
+                p2: Number,
+            }, (_) => new Empty()))), "correct string for error", `{ "p1": true, "p2": 1, "p3": null } `, Empty, JsonParser.UnknownKeysError, `
+When trying to read a value for specification: Empty
+I saw: {"p1":true,"p2":1,"p3":null}
+But I saw the following keys which are not accepted by the specification: "p1", "p3"
+`, true),
+    ),
 
     testGroup("unknown spec",
-        assertParseFailsWithUnknownSpec("top level", new JsonParser(), '1', Empty, Empty),
-        assertParseFailsWithUnknownSpec("in array", new JsonParser(), '[1]', [Array, Empty], Empty),
+        assertParseFailsWithUnknownSpec("top level", new JsonParser(), '1', Empty, 'Empty'),
+        testParseAsOrThrowFails("correct string for simple error", '1', Empty, JsonParser.UnknownSpecError, `
+When trying to read a value for specification: Empty
+I saw: 1
+But I don't know how to parse a value for the specification: Empty
+`, true),
+        assertParseFailsWithUnknownSpec("in array", new JsonParser(), '[1]', [Array, Empty], 'Empty'),
         assertParseFailsWithUnknownSpec("in other specification",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown spec test', {
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
                 p1: Basic,
-            }, (_) => new Empty()))), `{"p1": 1}`, Empty, Basic),
+            }, (_) => new Empty()))), `{ "p1": 1 } `, Empty, 'Basic'),
         assertParseFailsWithUnknownSpec("nested",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>('unknown spec test', {
+            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
                 p1: [Basic, Empty],
-            }, (_) => new Empty()))), `{"p1": 1}`, Empty, [Basic, Empty])
+            }, (_) => new Empty()))), `{ "p1": 1 } `, Empty, '[Basic, Empty]')
     ),
 ).runAsMain();
