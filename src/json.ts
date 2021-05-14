@@ -195,15 +195,6 @@ export class JsonParser {
             const schema = maybeSchema.unwrap();
             return schema.on(this, jv);
         }
-        if (cls === AnyTy) {
-            if (jv.isArray()) {
-                return this.loadAs(jv, [Array, AnyTy]);
-            } else if (jv.isObject()) {
-                return this.loadAs(jv, [Object, AnyTy]);
-            } else {
-                return JsonParser.parseOk(jv.unwrapFully());
-            }
-        }
         return JsonParser.failParse(new JsonParser.UnknownSpecError(cls));
     }
 
@@ -313,61 +304,81 @@ export class JsonSchema<T> {
         this.description = description;
     }
 
+    static genArraySchema<T>(eltSpec: TySpec, onRes: (x: any[]) => T): JParser<T>['onArray'] {
+        return (parser: JsonParser, json: JsonArray): JsonParseResult<T> => {
+            const res = new Array<any>();
+            const arr = json.unwrap();
+            for (let i = 0; i < arr.length; i++) {
+                const v = parser.loadAs(arr[i], eltSpec);
+                if (v.isLeft()) {
+                    return v.propLeft();
+                }
+                res[i] = v.unwrapRight();
+            }
+            return JsonParser.parseOk(onRes(res));
+        }
+    }
+
     static arraySchema<T>(desc: string, eltSpec: TySpec, onRes: (x: any[]) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onArray(parser: JsonParser, json: JsonArray): JsonParseResult<T> {
-                const res = new Array<any>();
-                const arr = json.unwrap();
-                for (let i = 0; i < arr.length; i++) {
-                    const v = parser.loadAs(arr[i], eltSpec);
-                    if (v.isLeft()) {
-                        return v.propLeft();
-                    }
-                    res[i] = v.unwrapRight();
-                }
-                return JsonParser.parseOk(onRes(res));
-            }
+            onArray: JsonSchema.genArraySchema(eltSpec, onRes),
         });
+    }
+
+    static genBooleanSchema<T>(onRes: (x: boolean) => T): JParser<T>['onBoolean'] {
+        return (_parser: JsonParser, json: JsonBoolean): JsonParseResult<T> => {
+            return JsonParser.parseOk(onRes(json.unwrap()));
+        }
     }
 
     static booleanSchema<T>(desc: string, onRes: (x: boolean) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onBoolean(_parser: JsonParser, json: JsonBoolean): JsonParseResult<T> {
-                return JsonParser.parseOk(onRes(json.unwrap()));
-            }
+            onBoolean: JsonSchema.genBooleanSchema(onRes)
         });
+    }
+
+    static genNullSchema<T>(onRes: (x: null) => T): JParser<T>['onNull'] {
+        return (_parser: JsonParser, json: JsonNull): JsonParseResult<T> => {
+            return JsonParser.parseOk(onRes(json.unwrap()));
+        }
     }
 
     static nullSchema<T>(desc: string, onRes: (x: null) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onNull(_parser: JsonParser, json: JsonNull): JsonParseResult<T> {
-                return JsonParser.parseOk(onRes(json.unwrap()));
-            }
+            onNull: JsonSchema.genNullSchema(onRes)
         });
+    }
+
+    static genNumberSchema<T>(onRes: (x: number) => T): JParser<T>['onNumber'] {
+        return (_parser: JsonParser, json: JsonNumber): JsonParseResult<T> => {
+            return JsonParser.parseOk(onRes(json.unwrap()));
+        }
     }
 
     static numberSchema<T>(desc: string, onRes: (x: number) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onNumber(_parser: JsonParser, json: JsonNumber): JsonParseResult<T> {
-                return JsonParser.parseOk(onRes(json.unwrap()));
-            }
+            onNumber: JsonSchema.genNumberSchema(onRes)
         });
+    }
+
+    static genObjectMapSchema<T>(kfun: (k: string) => TySpec, onRes: (x: Map<string, any>) => T): JParser<T>['onObject'] {
+        return (parser: JsonParser, json: JsonObject): JsonParseResult<T> => {
+            const res = new Map<string, any>();
+            const obj = json.unwrap();
+            for (const k in obj) {
+                const v = parser.loadAs(obj[k], kfun(k));
+                if (v.isLeft()) {
+                    return v.propLeft();
+                }
+                res.set(k, v.unwrapRight());
+            }
+            return JsonParser.parseOk(onRes(res));
+        }
     }
 
     static objectSchemaMap<T>(desc: string, kfun: (k: string) => TySpec, onRes: (x: Map<string, any>) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onObject(parser: JsonParser, json: JsonObject): JsonParseResult<T> {
-                const res = new Map<string, any>();
-                const obj = json.unwrap();
-                for (const k in obj) {
-                    const v = parser.loadAs(obj[k], kfun(k));
-                    if (v.isLeft()) {
-                        return v.propLeft();
-                    }
-                    res.set(k, v.unwrapRight());
-                }
-                return JsonParser.parseOk(onRes(res));
-            }
+            onObject: JsonSchema.genObjectMapSchema(kfun, onRes),
         });
     }
 
@@ -406,12 +417,20 @@ export class JsonSchema<T> {
         });
     }
 
+    static genStringSchema<T>(onRes: (x: string) => T): JParser<T>['onString'] {
+        return (_parser: JsonParser, json: JsonString): JsonParseResult<T> => {
+            return JsonParser.parseOk(onRes(json.unwrap()));
+        }
+    }
+
     static stringSchema<T>(desc: string, onRes: (x: string) => T): JsonSchema<T> {
         return new JsonSchema(desc, {
-            onString(_parser: JsonParser, json: JsonString): JsonParseResult<T> {
-                return JsonParser.parseOk(onRes(json.unwrap()));
-            }
+            onString: JsonSchema.genStringSchema(onRes)
         });
+    }
+
+    static customSchema<T>(desc: string, specs: Partial<JParser<T>>): JsonSchema<T> {
+        return new JsonSchema(desc, specs);
     }
 
     /** Get a human-readable description of what the schema parses. */
@@ -533,6 +552,14 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
 
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
+        .addSchema(AnyTy, JsonSchema.customSchema('anything', {
+            onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
+            onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),
+            onNull: JsonSchema.genNullSchema(t => t),
+            onNumber: JsonSchema.genNumberSchema(t => t),
+            onObject: JsonSchema.genObjectMapSchema(_ => AnyTy, r => mapToObject<JsonValueRaw>(r)),
+            onString: JsonSchema.genStringSchema(s => s),
+        }))
         .addSchema(Array, (t) => JsonSchema.arraySchema('Array of ' + tySpecDescription(t), t, r => r))
         .addAlias(Array, [Array, AnyTy])
         .addSchema(Boolean, JsonSchema.booleanSchema('boolean', x => x))
