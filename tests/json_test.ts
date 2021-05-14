@@ -40,6 +40,55 @@ function testParseAsOrThrowFailsWithTypeError(innerDesc: string, toParse: string
     return testParseAsOrThrowFailsWithParser(basicParser, innerDesc, toParse, ty, JsonParser.JsonTypeError, msgIncludes);
 }
 
+class Basic {
+    p: boolean;
+
+    constructor(p: boolean) {
+        this.p = p;
+    }
+}
+
+class Basic2 {
+    p: Basic;
+
+    constructor(p: Basic) {
+        this.p = p;
+    }
+}
+
+const basicSchema = JsonSchema.objectSchema<Basic>('Basic', {
+    'p': Boolean
+}, (o) => {
+    return new Basic(o.get('p'));
+});
+
+const basic2Schema = JsonSchema.objectSchema<Basic2>('Basic2', {
+    p: Basic,
+}, (o) => { return new Basic2(o.get('p')); });
+
+class MyArray<T> {
+    arr: T[];
+
+    constructor(arr: T[]) {
+        this.arr = arr;
+    }
+}
+
+const basicSchemas = Schemas.emptySchemas();
+basicSchemas.addSchema(Basic, basicSchema);
+
+const basic2SchemaMap = Schemas.emptySchemas();
+basic2SchemaMap.addSchema(Basic, basicSchema);
+basic2SchemaMap.addSchema(Basic2, basic2Schema);
+
+const myArraySchemas = Schemas.emptySchemas();
+myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema('MyArray', t, r => new MyArray(r)));
+myArraySchemas.addSchema(Basic, basicSchema);
+
+const parserBasic = new JsonParser(basicSchemas);
+const basic2Parser = new JsonParser(basic2SchemaMap);
+const myArrayParser = new JsonParser(myArraySchemas);
+
 testGroup("parseAsOrThrow",
     testGroup("array",
         testParseAsOrThrow("empty array", "[]", Array, []),
@@ -116,84 +165,33 @@ testGroup("parseAsOrThrow",
         testParseAsOrThrow("singleton number array", "[1]", AnyTy, [1]),
         testParseAsOrThrow("number", "1", AnyTy, 1),
         testParseAsOrThrow("boolean", "true", AnyTy, true),
-    )
-).runAsMain();
+    ),
 
-class Basic {
-    p: boolean;
+    testGroup("with schema",
+        testGroup("Basic",
+            testParseAsOrThrowWithParser(parserBasic, "ok", `{"p": true}`, Basic, new Basic(true)),
+            testParseAsOrThrowFailsWithParser(parserBasic, "missing key", `{}`, Basic, JsonParser.MissingKeysError, "missing keys: p"),
+            testParseAsOrThrowFailsWithParser(parserBasic, "extra key", `{"p": true, "q": 1}`, Basic, JsonParser.UnknownKeysError, "unknown keys: q"),
+            testParseAsOrThrowFailsWithParser(parserBasic, "Basic, not on an object", '7', Basic, JsonParser.JsonTypeError),
+        ),
 
-    constructor(p: boolean) {
-        this.p = p;
-    }
-}
+        testGroup("Basic2",
+            testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, is empty", `{"p": {}}`, Basic2, JsonParser.MissingKeysError, "missing keys: p"),
+            testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, wrong type", `{"p": {"p": 1}}`, Basic2, JsonParser.JsonTypeError, "expected: boolean"),
+            testParseAsOrThrowWithParser(basic2Parser, "ok", `{"p": {"p": true}}`, Basic2, new Basic2(new Basic(true))),
+        ),
 
-const basicSchema = JsonSchema.objectSchema<Basic>('Basic', {
-    'p': Boolean
-}, (o) => {
-    return new Basic(o.get('p'));
-});
-
-const basicSchemas = Schemas.emptySchemas();
-
-basicSchemas.addSchema(Basic, basicSchema);
-
-const parserBasic = new JsonParser(basicSchemas);
-
-testGroup("parseAsOrThrow, with schema, Basic",
-    testParseAsOrThrowWithParser(parserBasic, "ok", `{"p": true}`, Basic, new Basic(true)),
-    testParseAsOrThrowFailsWithParser(parserBasic, "missing key", `{}`, Basic, JsonParser.MissingKeysError, "missing keys: p"),
-    testParseAsOrThrowFailsWithParser(parserBasic, "extra key", `{"p": true, "q": 1}`, Basic, JsonParser.UnknownKeysError, "unknown keys: q"),
-    testParseAsOrThrowFailsWithParser(parserBasic, "Basic, not on an object", '7', Basic, JsonParser.JsonTypeError),
-).runAsMain();
-
-
-class Basic2 {
-    p: Basic;
-
-    constructor(p: Basic) {
-        this.p = p;
-    }
-}
-
-const basic2Schema = JsonSchema.objectSchema<Basic2>('Basic2', {
-    p: Basic,
-}, (o) => { return new Basic2(o.get('p')); });
-
-const basic2SchemaMap = Schemas.emptySchemas();
-basic2SchemaMap.addSchema(Basic, basicSchema);
-basic2SchemaMap.addSchema(Basic2, basic2Schema);
-
-const basic2Parser = new JsonParser(basic2SchemaMap);
-
-testGroup("parseAsOrThrow, with schema, Basic2",
-    testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, is empty", `{"p": {}}`, Basic2, JsonParser.MissingKeysError, "missing keys: p"),
-    testParseAsOrThrowFailsWithParser(basic2Parser, "inner item does not match Basic, wrong type", `{"p": {"p": 1}}`, Basic2, JsonParser.JsonTypeError, "expected: boolean"),
-    testParseAsOrThrowWithParser(basic2Parser, "ok", `{"p": {"p": true}}`, Basic2, new Basic2(new Basic(true))),
-).runAsMain();
-
-class MyArray<T> {
-    arr: T[];
-
-    constructor(arr: T[]) {
-        this.arr = arr;
-    }
-}
-
-const myArraySchemas = Schemas.emptySchemas();
-
-myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema('MyArray', t, r => new MyArray(r)));
-myArraySchemas.addSchema(Basic, basicSchema);
-const myArrayParser = new JsonParser(myArraySchemas);
-
-testGroup("parseAsOrThrow, with schema, MyArray",
-    new Test("item is not of the correct type", () => {
-        assertParseFailsWith(myArrayParser, '{"k":1}', MyArray, new JsonParser.JsonTypeError('MyArray', 'object', { k: 1 }))
-    }),
-    new Test("inner element is not of the correct type", () => {
-        assertParseFailsWith(myArrayParser, '[1]', [MyArray, Boolean], new JsonParser.JsonTypeError('boolean', 'number', 1))
-    }),
-    testParseAsOrThrowWithParser(myArrayParser, "okay with array of boolean", "[true, false, true]", [MyArray, Boolean], new MyArray([true, false, true])),
-    testParseAsOrThrowWithParser(myArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [MyArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
+        testGroup("MyArray",
+            new Test("item is not of the correct type", () => {
+                assertParseFailsWith(myArrayParser, '{"k":1}', MyArray, new JsonParser.JsonTypeError('MyArray', 'object', { k: 1 }))
+            }),
+            new Test("inner element is not of the correct type", () => {
+                assertParseFailsWith(myArrayParser, '[1]', [MyArray, Boolean], new JsonParser.JsonTypeError('boolean', 'number', 1))
+            }),
+            testParseAsOrThrowWithParser(myArrayParser, "okay with array of boolean", "[true, false, true]", [MyArray, Boolean], new MyArray([true, false, true])),
+            testParseAsOrThrowWithParser(myArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [MyArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
+        ),
+    ),
 ).runAsMain();
 
 
