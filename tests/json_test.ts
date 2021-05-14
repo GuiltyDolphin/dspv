@@ -9,7 +9,6 @@ import {
 import {
     AnyTy,
     JsonParser,
-    JsonParseResult,
     JsonSchema,
     Schemas,
     TySpec,
