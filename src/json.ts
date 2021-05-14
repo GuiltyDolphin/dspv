@@ -199,12 +199,8 @@ class ParseContext {
         return new ParseContext();
     }
 
-    static readingValueForSpec(parent: ParseContext, schemas: Schemas, spec: TySpec): ParseContext {
-        return new ParseContext.ReadingValueForSpec(parent, schemas, spec);
-    }
-
-    static seenValue(parent: ParseContext, value: JsonValue): ParseContext {
-        return new ParseContext.SeenValue(parent, value);
+    static readingValueForSpec(parent: ParseContext, schemas: Schemas, spec: TySpec, value: JsonValue): ParseContext {
+        return new ParseContext.ReadingValueForSpec(parent, schemas, spec, value);
     }
 
     static keyEntered(parent: ParseContext, key: string): ParseContext {
@@ -212,30 +208,19 @@ class ParseContext {
     }
 
     private static ReadingValueForSpec = class extends ParseContext {
-        private spec: TySpec;
         private schemas: Schemas;
+        private spec: TySpec;
+        private value: JsonValue;
 
-        constructor(parent: ParseContext, schemas: Schemas, spec: TySpec) {
+        constructor(parent: ParseContext, schemas: Schemas, spec: TySpec, value: JsonValue) {
             super(parent);
             this.spec = spec;
             this.schemas = schemas;
-        }
-
-        renderThis(): string {
-            return "When trying to read a value for specification: " + this.schemas.getDescription(this.spec);
-        }
-    }
-
-    private static SeenValue = class extends ParseContext {
-        private value: JsonValue;
-
-        constructor(parent: ParseContext, value: JsonValue) {
-            super(parent);
             this.value = value;
         }
 
         renderThis(): string {
-            return "I saw: " + this.value.toJsonString();
+            return `When trying to read a value for specification: ${this.schemas.getDescription(this.spec)}\nI saw: ${this.value.toJsonString()}`;
         }
     }
 
@@ -279,12 +264,8 @@ export class JsonParser {
         this.context = Maybe.some(f(this.checkParsingOrFail()));
     }
 
-    private tryingToLoadValueForSpec(spec: TySpec) {
-        this.updateContext(c => ParseContext.readingValueForSpec(c, this.schemas, spec));
-    }
-
-    private seenValue(value: JsonValue) {
-        this.updateContext(c => ParseContext.seenValue(c, value));
+    private tryingToLoadValueForSpec(spec: TySpec, value: JsonValue) {
+        this.updateContext(c => ParseContext.readingValueForSpec(c, this.schemas, spec, value));
     }
 
     private contextEnterKey(k: string) {
@@ -312,13 +293,11 @@ export class JsonParser {
 
     /** Parse the JSON text as a member of the given type. */
     loadAs(jv: JsonValue, cls: TySpec): JsonParseResult<any> {
-        this.tryingToLoadValueForSpec(cls);
-        this.seenValue(jv);
+        this.tryingToLoadValueForSpec(cls, jv);
         const maybeSchema = this.schemas.getSchemaForSpec(cls);
         if (maybeSchema.isSome()) {
             const schema = maybeSchema.unwrap();
             const res = schema.on(this, jv);
-            this.contextPop();
             this.contextPop();
             return res;
         }
