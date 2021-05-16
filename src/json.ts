@@ -1,5 +1,7 @@
 import { Either, Maybe } from './deps.ts';
 
+import { acceptsNumberOfArgs } from './functional.ts';
+
 import { NestMap } from './util.ts';
 
 type GenJsonType<T> = {
@@ -620,6 +622,17 @@ function flattenTySpec(x: TySpec): NonEmptyList<TySpecBase> {
     return [x];
 }
 
+function has2OrMoreElems<T>(xs: NonEmptyList<T>): xs is [T, T, ...T[]] {
+    return xs.length > 1;
+}
+
+function tySpecBaseArrayToTySpec(tys: NonEmptyList<TySpecBase>): TySpec {
+    if (has2OrMoreElems(tys)) {
+        return tys;
+    }
+    return tys[0];
+}
+
 export class Schemas {
     private schemas: TySpecMap;
     private aliases: NestMap<TySpecBase, TySpec>;
@@ -652,12 +665,12 @@ export class Schemas {
      * The description may either be a string, or a function that takes a
      * rendering function and a list of specifications, and produces a string.
      */
-    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string, ...args: TySpec[]) => string)): Schemas {
+    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string)): Schemas {
         const s = flattenTySpec(spec);
         if (typeof description === 'string') {
-            this.descriptions.set(s, () => description);
+            this.descriptions.set(s, (..._) => description);
         } else {
-            this.descriptions.set(s, (...args) => description((t) => this.getDescription(t), ...args));
+            this.descriptions.set(s, description(t => this.getDescription(t)));
         }
         return this;
     }
@@ -667,23 +680,52 @@ export class Schemas {
         return alias.maybe(spec, alias => this.resolveAlias(alias));
     }
 
-    private mostSpecificSchema(spec: TySpec): Maybe<[SchemaBuilder, TySpec[]]> {
-        return this.schemas.getBestAndRest(flattenTySpec(spec));
+    private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, SchemaBuilder, TySpec[]]> {
+        return this.schemas.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
+            const [path, builder, rest] = x;
+            return [tySpecBaseArrayToTySpec(path), builder, rest];
+        });
     }
 
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
         return this.mostSpecificSchema(this.resolveAlias(spec))
-            .map(([f, args]: [SchemaBuilder, TySpec[]]) => f(...args));
+            .map(([foundSpec, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => {
+                if (!acceptsNumberOfArgs(f, args.length)) {
+                    throw new Schemas.WrongNumberOfArgumentsError(foundSpec, args.length, f.length);
+                }
+                return f(...args);
+            });
     }
 
-    getDescription(spec: TySpec, ...tys: TySpec[]): string {
-        return this.getDescriptionMap().get(flattenTySpec(this.resolveAlias(spec))).maybef(() => {
+    private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
+        return this.descriptions.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
+            const [path, descFn, rest] = x;
+            return [tySpecBaseArrayToTySpec(path), descFn, rest];
+        });
+    }
+
+    static _getDescriptionBase(spec: TySpec): string {
+        if (spec instanceof Array) {
+            return `[${spec.map(t => Schemas._getDescriptionBase(t)).join(', ')}]`;
+        } else {
+            return tySpecBaseDescription(spec);
+        }
+    }
+
+    getDescription(spec: TySpec): string {
+        return this.mostSpecificDescription(this.resolveAlias(spec)).maybef(() => {
             if (spec instanceof Array) {
                 return `[${spec.map(t => this.getDescription(t)).join(', ')}]`;
             } else {
                 return tySpecBaseDescription(spec);
             }
-        }, c => c(...tys));
+        }, c => {
+            let [foundSpec, descFn, args] = c;
+            if (!acceptsNumberOfArgs(descFn, args.length)) {
+                throw new Schemas.WrongNumberOfArgumentsError(foundSpec, args.length, descFn.length);
+            }
+            return descFn(...args)
+        });
     }
 
     protected getSchemaMap(): TySpecMap {
@@ -715,6 +757,12 @@ export class Schemas {
         schemas.map(e => newSchemas.mergeWith(e));
         return newSchemas;
     }
+
+    static WrongNumberOfArgumentsError = class extends TypeError {
+        constructor(spec: TySpec, numActual: number, numExpected: number) {
+            super(`The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} arguments, but expected ${numExpected}`);
+        }
+    }
 }
 
 function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
@@ -737,12 +785,12 @@ function defaultSchema(): Schemas {
         }))
         .addDescription(AnyTy, 'anything')
         .addSchema(Array, (t) => JsonSchema.arraySchema(t, r => r))
-        .addDescription(Array, (getDesc, t) => 'Array of ' + getDesc(t))
+        .addDescription(Array, getDesc => t => 'Array of ' + getDesc(t))
         .addAlias(Array, [Array, AnyTy])
         .addSchema(Boolean, JsonSchema.booleanSchema(x => x))
         .addDescription(Boolean, 'boolean')
         .addSchema([Map, String], t => JsonSchema.objectSchemaMap(_ => t, r => r))
-        .addDescription([Map, String], (getDesc, t) => "Map with string keys and values matching " + getDesc(t))
+        .addDescription([Map, String], getDesc => t => "Map with string keys and values matching " + getDesc(t))
         .addAlias(Map, [Map, String])
         .addAlias([Map, String], [Map, String, AnyTy])
         .addSchema(null, JsonSchema.nullSchema(x => x))
@@ -750,7 +798,7 @@ function defaultSchema(): Schemas {
         .addSchema(Number, JsonSchema.numberSchema(x => x))
         .addDescription(Number, 'number')
         .addSchema(Object, t => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)))
-        .addDescription(Object, (getDesc, t) => 'Object whose values are ' + getDesc(t))
+        .addDescription(Object, getDesc => t => 'Object whose values are ' + getDesc(t))
         .addAlias(Object, [Object, AnyTy])
         .addSchema(String, JsonSchema.stringSchema(x => x))
         .addDescription(String, 'string');

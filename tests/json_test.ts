@@ -16,6 +16,10 @@ import {
     TySpec,
 } from '../mod.ts';
 
+import {
+    Maybe
+} from '../src/functional.ts';
+
 const basicParser = new JsonParser();
 
 function testParseAsOrThrowWithParser(parser: JsonParser, innerDesc: string, toParse: string, ty: TySpec, expected: unknown): Test {
@@ -90,11 +94,13 @@ basic2SchemaMap.addSchema(Basic2, basic2Schema);
 const myArraySchemas = Schemas.emptySchemas();
 myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
 myArraySchemas.addSchema(Basic, basicSchema);
+myArraySchemas.addAlias(MyArray, [MyArray, AnyTy]);
 
 const customArray = Symbol("customArray");
 const customArraySchemas = Schemas.emptySchemas();
 customArraySchemas.addSchema(customArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
 customArraySchemas.addDescription(customArray, 'custom array');
+customArraySchemas.addAlias(customArray, [customArray, AnyTy]);
 customArraySchemas.addSchema(Basic, basicSchema);
 
 const parserBasic = new JsonParser(basicSchemas);
@@ -281,7 +287,7 @@ I saw: 1
 But this is a number
 `, true),
         testParseAsOrThrowFails("correct string for slightly complex error", '{"p": true}', [Object, Number], JsonParser.JsonTypeError, `
-When trying to read a value for specification: [Object, number]
+When trying to read a value for specification: Object whose values are number
 I saw: {"p":true}
 In key: "p"
 When trying to read a value for specification: number
@@ -342,5 +348,75 @@ But I don't know how to parse a value for the specification: Empty
             new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
                 p1: [Basic, Empty],
             }, (_) => new Empty()))), `{ "p1": 1 } `, Empty, '[Basic, Empty]')
+    ),
+).runAsMain();
+
+
+const wants2Args = Symbol("wants2Args");
+const justAString = Symbol("justAString");
+const wantsNoArgs = Symbol("wantsNoArgs");
+
+const errSchema = new Schemas();
+errSchema.addDescription(wants2Args, getDesc => (t1, t2) => `the description with ${getDesc(t1)} and ${getDesc(t2)}`);
+errSchema.addDescription(justAString, "Just a string");
+errSchema.addDescription(wantsNoArgs, _ => () => "wanted no args");
+const resSchema = JsonSchema.arraySchema([Map, Number, Boolean], t => t);
+errSchema.addSchema(wants2Args, (_t1, _t2) => resSchema);
+errSchema.addSchema(wantsNoArgs, () => JsonSchema.booleanSchema(x => x));
+
+function testWrongNumberOfSpecArguments(desc: string, f: () => any, spec: TySpec, numActual: number, numExpected: number): Test {
+    return new Test(desc, () => {
+        const err = assertThrows(f, Schemas.WrongNumberOfArgumentsError);
+        assertEquals(err.message, `The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} arguments, but expected ${numExpected}`);
+    });
+}
+
+function testWrongNumberOfDescriptionSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, numExpected: number): Test {
+    return testWrongNumberOfSpecArguments(desc, () => errSchema.getDescription(spec), specExpected, numActual, numExpected);
+}
+
+function testWrongNumberOfSchemaSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, numExpected: number): Test {
+    return testWrongNumberOfSpecArguments(desc, () => errSchema.getSchemaForSpec(spec), specExpected, numActual, numExpected);
+}
+
+function testGetDescriptionOkay(desc: string, spec: TySpec, expected: string): Test {
+    return new Test(desc, () => {
+        assertEquals(errSchema.getDescription(spec), expected)
+    });
+}
+
+function testGetSchemaOkay(desc: string, spec: TySpec, expected: JsonSchema<any>): Test {
+    return new Test(desc, () => {
+        assertEquals(errSchema.getSchemaForSpec(spec), Maybe.some(expected))
+    });
+}
+
+testGroup("Schemas",
+    testGroup("getDescription",
+        testGroup("too few spec arguments",
+            testWrongNumberOfDescriptionSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 2),
+            testWrongNumberOfDescriptionSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 2),
+        ),
+        testGroup("correct number of spec arguments",
+            testGetDescriptionOkay("with function", [wants2Args, Number, Boolean], "the description with Number and Boolean"),
+            testGetDescriptionOkay("0 with function", wantsNoArgs, "wanted no args"),
+            testGetDescriptionOkay("0 with string", justAString, "Just a string"),
+            testGetDescriptionOkay("1 with string", [justAString, Number], "Just a string"),
+        ),
+        testGroup("too many spec arguments",
+            testWrongNumberOfDescriptionSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 2),
+            testWrongNumberOfDescriptionSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 0),
+        ),
+    ),
+    testGroup("getSchemaForSpec",
+        testGroup("too few spec arguments",
+            testWrongNumberOfSchemaSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 2),
+            testWrongNumberOfSchemaSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 2),
+        ),
+        testGetSchemaOkay("correct number of spec arguments", [wants2Args, Number, Boolean], resSchema),
+        testGroup("too many spec arguments",
+            testWrongNumberOfSchemaSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 0),
+            testWrongNumberOfSchemaSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 2),
+        ),
     ),
 ).runAsMain();

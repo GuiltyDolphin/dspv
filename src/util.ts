@@ -105,6 +105,10 @@ export class NestMap<K, V> {
         })));
     }
 
+    getBestAndRestWithPath(ks: [K, ...K[]]): Maybe<[[K, ...K[]], V, K[]]> {
+        return this.getBestAndRest(ks).map(x => [ks.slice(0, ks.length - x[1].length) as [K, ...K[]], x[0], x[1]]);
+    }
+
     set([k, ...ks]: [K, ...K[]], v: V): NestMap<K, V> {
         return this.setThere([k, ...ks], v);
     }

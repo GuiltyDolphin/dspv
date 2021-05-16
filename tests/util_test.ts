@@ -38,10 +38,20 @@ function testGetNotThere<K, V>(description: string, map: NestMap<K, V>, path: No
     return testGetBase(description, map, path, Maybe.none());
 }
 
+function testGetBestAndRestWithPathBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: Maybe<[[K, ...K[]], V, K[]]>): Test {
+    return new Test(description, () => {
+        assertEquals(map.getBestAndRestWithPath(path), expected);
+    });
+}
+
 function testGetBestAndRestBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: Maybe<[V, K[]]>): Test {
     return new Test(description, () => {
         assertEquals(map.getBestAndRest(path), expected);
     });
+}
+
+function testGetBestAndRestWithPath<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: [[K, ...K[]], V, K[]]): Test {
+    return testGetBestAndRestWithPathBase(description, map, path, Maybe.some(expected));
 }
 
 function testGetBestAndRest<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: [V, K[]]): Test {
@@ -74,6 +84,19 @@ testGroup("NestMap",
         testGet("subkey, when there are no higher keys", m2, ["k1", "k2"], 2),
         testGetNotThere("top level key that doesn't exist", m0, ["k"]),
         testGetNotThere("subkey that doesn't exist when toplevel key exists", m1, ["k1", "k3"]),
+    ),
+
+    testGroup("getBestAndRestWithPath",
+        testGroup("top level key",
+            testGetBestAndRestWithPath("when there are no subkeys under this key", m0, ["k1"], [["k1"], 1, []]),
+            testGetBestAndRestWithPath("when there are subkeys under this key", m1, ["k1"], [["k1"], 1, []]),
+            testGetBestAndRestWithPath("when there are no subsequent keys", m0, ["k1", "k2"], [["k1"], 1, ["k2"]]),
+        ),
+        testGroup("subkey",
+            testGetBestAndRestWithPath("when there are higher keys", m1, ["k1", "k2"], [["k1", "k2"], 2, []]),
+            testGetBestAndRestWithPath("when there are no higher keys", m2, ["k1", "k2"], [["k1", "k2"], 2, []]),
+            testGetBestAndRestWithPath("when there are no subsquent keys", m2, ["k1", "k2", "k3"], [["k1", "k2"], 2, ["k3"]]),
+        ),
     ),
 
     testGroup("getBestAndRest",
