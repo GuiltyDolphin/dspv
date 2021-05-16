@@ -132,7 +132,7 @@ type JsonNumber = GenJsonValue<"number">;
 
 type JsonString = GenJsonValue<"string">;
 
-export function toJsonValue(x: any): Either<string, JsonValue> {
+function toJsonValue(x: any): Either<string, JsonValue> {
     const pure = Either.pure;
     const fail = Either.fail;
     if (typeof x === 'string') {
