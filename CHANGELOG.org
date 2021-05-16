@@ -7,6 +7,8 @@
 
 ** Added
 
+- make recipes
+  - =coverage= for building project coverage
 - =parseAs= function for specifying which type to parse JSON
   text into
 

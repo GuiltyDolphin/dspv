@@ -4,6 +4,12 @@ Deno module for working with JSON and TypeScript.
 
 * Development
 
+** Coverage
+
+To generate code test coverage, make sure you have access to
+the =genhtml= tool (e.g., via the [[https://aur.archlinux.org/packages/lcov/][lcov package on AUR]]), then
+run =make coverage= in the top-level of the project.
+
 ** Testing
 
 Run =make test= or =deno test= in the top-level of the project
