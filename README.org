@@ -1,3 +1,10 @@
 #+TITLE: deno-json-ts
 
 Deno module for working with JSON and TypeScript.
+
+* Development
+
+** Testing
+
+Run =make test= or =deno test= in the top-level of the project
+to run the tests.
