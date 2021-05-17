@@ -800,6 +800,8 @@ function defaultSchema(): Schemas {
         .addSchema(Object, t => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)))
         .addDescription(Object, getDesc => t => 'Object whose values are ' + getDesc(t))
         .addAlias(Object, [Object, AnyTy])
+        .addSchema(Set, (t) => JsonSchema.arraySchema(t, r => new Set(r)))
+        .addAlias(Set, [Set, AnyTy])
         .addSchema(String, JsonSchema.stringSchema(x => x))
         .addDescription(String, 'string');
 }

@@ -171,6 +171,13 @@ testGroup("parseAsOrThrow",
         testParseAsOrThrowFailsWithTypeError("object of numbers", `{"k": 1}`, [Object, Boolean]),
     ),
 
+    testGroup("Set",
+        testParseAsOrThrow("empty array", "[]", Set, new Set()),
+        testParseAsOrThrow("singleton number array", "[1]", Set, new Set([1])),
+        testParseAsOrThrow("mixed element array", "[1, true, [5], \"test\"]", Set, new Set([1, true, [5], "test"])),
+        testParseAsOrThrowFailsWithTypeError("not an array (an object)", "{}", Set),
+    ),
+
     testGroup("string",
         testParseAsOrThrow("empty string", "\"\"", String, ""),
         testParseAsOrThrow("nonempty string", "\"test\"", String, "test"),
