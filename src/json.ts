@@ -2,7 +2,13 @@ import { Either, Maybe } from './deps.ts';
 
 import { acceptsNumberOfArgs } from './functional.ts';
 
-import { NestMap } from './util.ts';
+import {
+    flattenNonEmpty,
+    groupingStartAndEnd,
+    NestMap,
+    NonEmpty,
+    NonEmptyNested,
+} from './util.ts';
 
 type GenJsonType<T> = {
     "array": T[],
@@ -605,32 +611,21 @@ interface Constructor {
 /** Represents values that can take any type. */
 export const AnyTy = Symbol("AnyTy");
 
-type NonEmptyList<T> = [T, ...T[]];
-
 type SchemaBuilder = (...args: TySpec[]) => JsonSchema<any>;
 
 type TySpecMap = NestMap<TySpecBase, SchemaBuilder>;
 
 type DescriptionFn = (...args: TySpec[]) => string;
 
-function flattenTySpec(x: TySpec): NonEmptyList<TySpecBase> {
+function tySpecAsGroupedBase(x: TySpec): NonEmptyNested<TySpecBase> {
     if (x instanceof Array) {
-        let [head, ...tail] = x;
-        const rs = tail.map(flattenTySpec).flat();
-        return [head, ...rs];
+        return x;
     }
     return [x];
 }
 
-function has2OrMoreElems<T>(xs: NonEmptyList<T>): xs is [T, T, ...T[]] {
-    return xs.length > 1;
-}
-
-function tySpecBaseArrayToTySpec(tys: NonEmptyList<TySpecBase>): TySpec {
-    if (has2OrMoreElems(tys)) {
-        return tys;
-    }
-    return tys[0];
+function flattenTySpec(x: TySpec): NonEmpty<TySpecBase> {
+    return flattenNonEmpty(tySpecAsGroupedBase(x));
 }
 
 export class Schemas {
@@ -683,7 +678,8 @@ export class Schemas {
     private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, SchemaBuilder, TySpec[]]> {
         return this.schemas.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
             const [path, builder, rest] = x;
-            return [tySpecBaseArrayToTySpec(path), builder, rest];
+            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
+            return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, builder, args as TySpec[]];
         });
     }
 
@@ -700,7 +696,8 @@ export class Schemas {
     private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
         return this.descriptions.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
             const [path, descFn, rest] = x;
-            return [tySpecBaseArrayToTySpec(path), descFn, rest];
+            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
+            return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, descFn, args as TySpec[]];
         });
     }
 
@@ -773,8 +770,32 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
     return res;
 }
 
+/** Matches if any of the specifications match. Matches with the first matching specification. */
+export const anyOf = Symbol("anyOf");
+
+function allSchemasSame(f: (parser: JsonParser, value: JsonValue) => JsonParseResult<unknown>) {
+    return {
+        onArray: f,
+        onBoolean: f,
+        onNull: f,
+        onNumber: f,
+        onObject: f,
+        onString: f,
+    };
+}
+
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
+        .addSchema(anyOf, (...tys) => JsonSchema.customSchema(allSchemasSame(
+            (parser, json) => {
+                for (const ty of tys) {
+                    const res = parser.loadAs(json, ty);
+                    if (res.isRight()) {
+                        return res;
+                    }
+                }
+                return parser.failWithTypeError(json.getType(), json);
+            })))
         .addSchema(AnyTy, JsonSchema.customSchema({
             onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
             onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),

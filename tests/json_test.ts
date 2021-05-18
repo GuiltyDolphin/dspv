@@ -8,6 +8,7 @@ import {
 } from './deps.ts';
 
 import {
+    anyOf,
     AnyTy,
     JsonParseError,
     JsonParser,
@@ -103,10 +104,27 @@ customArraySchemas.addDescription(customArray, 'custom array');
 customArraySchemas.addAlias(customArray, [customArray, AnyTy]);
 customArraySchemas.addSchema(Basic, basicSchema);
 
+const alwaysEmptyArray = Symbol('alwaysEmptyArray');
+const negatedBoolean = Symbol('negatedBoolean');
+const nullBecomes5 = Symbol('nullBecomes5');
+const alwaysZero = Symbol('alwaysZero');
+const alwaysEmptyObject = Symbol('alwaysEmptyObject');
+const alwaysEmptyString = Symbol('alwaysEmptyString');
+const extraSchemas = Schemas.emptySchemas()
+    .addSchema(alwaysEmptyArray, JsonSchema.arraySchema(AnyTy, _ => []))
+    .addSchema(negatedBoolean, JsonSchema.booleanSchema(r => !r))
+    .addSchema(nullBecomes5, JsonSchema.nullSchema(_ => 5))
+    .addSchema(alwaysZero, JsonSchema.numberSchema(_ => 0))
+    .addSchema(alwaysEmptyObject, JsonSchema.objectSchemaMap(_ => AnyTy, _ => new Object()))
+    .addSchema(alwaysEmptyString, JsonSchema.stringSchema(_ => ""))
+
 const parserBasic = new JsonParser(basicSchemas);
 const basic2Parser = new JsonParser(basic2SchemaMap);
 const myArrayParser = new JsonParser(myArraySchemas);
 const customArrayParser = new JsonParser(customArraySchemas);
+const parserWithExtra = new JsonParser(extraSchemas);
+
+const anyOfMixElems: TySpec = [anyOf, alwaysEmptyArray, negatedBoolean, nullBecomes5, alwaysZero, alwaysEmptyObject, alwaysEmptyString];
 
 testGroup("parseAsOrThrow",
     testGroup("standard JSON types",
@@ -191,6 +209,23 @@ testGroup("parseAsOrThrow",
     ),
 
     testGroup("special specs",
+        testGroup("anyOf",
+            testGroup("boolean or string",
+                testParseAsOrThrow("true", 'true', [anyOf, Boolean, String], true),
+                testParseAsOrThrow('"test"', '"test"', [anyOf, Boolean, String], "test"),
+                testParseAsOrThrowFailsWithTypeError("a number", '1', [anyOf, Boolean, String]),
+            ),
+            testGroup("empty array or negated boolean or null becomes 5 or always zero or always empty string or always empty object",
+                testParseAsOrThrowWithParser(parserWithExtra, '[[3], true, null, 1, "test", {"k": 1}]', '[[3], true, null, 1, "test", {"k": 1}]', [Array, anyOfMixElems], [[], false, 5, 0, "", {}]),
+            ),
+            testGroup("boolean or string or number inside array",
+                testParseAsOrThrow('[true, 1, "test"]', '[true, 1, "test"]', [Array, [anyOf, Boolean, String, Number]], [true, 1, "test"]),
+                testParseAsOrThrow('"test"', '"test"', [anyOf, Boolean, String], "test"),
+                assertParseFailsWithTypeError("a number", basicParser, '1', [Array, [anyOf, Boolean, String, Number]], [Array, [anyOf, Boolean, String, Number]], 'number', 1),
+                assertParseFailsWithTypeError("no matching elements", basicParser, '[null]', [Array, [anyOf, Boolean, String, Number]], [anyOf, Boolean, String, Number], 'null', null),
+            ),
+        ),
+
         testGroup("AnyTy",
             testParseAsOrThrow("array", '[[], false, null, 2, {}, "test"]', AnyTy,
                 [[], false, null, 2, {}, "test"]),

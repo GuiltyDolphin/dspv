@@ -1,4 +1,5 @@
 export {
+    anyOf,
     AnyTy,
     JsonParseError,
     JsonParser,
