@@ -717,7 +717,7 @@ export class Schemas {
                 return tySpecBaseDescription(spec);
             }
         }, c => {
-            let [foundSpec, descFn, args] = c;
+            const [foundSpec, descFn, args] = c;
             if (!acceptsNumberOfArgs(descFn, args.length)) {
                 throw new Schemas.WrongNumberOfArgumentsError(foundSpec, args.length, descFn.length);
             }
@@ -843,7 +843,7 @@ function tySpecBaseDescription(t: TySpecBase): string {
 
 function tySpecDescription(t: TySpec): string {
     if (t instanceof Array) {
-        let [head, ...rest] = t;
+        const [head, ...rest] = t;
         return `[${[tySpecBaseDescription(head), ...rest.map(tySpecDescription)].join(', ')}]`;
     } else {
         return tySpecBaseDescription(t);

@@ -42,7 +42,7 @@ function testGetNotThere<K, V>(description: string, map: NestMap<K, V>, path: No
     return testGetBase(description, map, path, Maybe.none());
 }
 
-function testGetBestAndRestWithPathBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: Maybe<[[K, ...K[]], V, K[]]>): Test {
+function testGetBestAndRestWithPathBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: Maybe<[NonEmpty<K>, V, K[]]>): Test {
     return new Test(description, () => {
         assertEquals(map.getBestAndRestWithPath(path), expected);
     });

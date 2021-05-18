@@ -73,9 +73,9 @@ function nestedActions<T>(xs: SafeNested<T>, paren: number = 0): listAction[] {
 }
 
 function groupingFromStartAsBestYouCan<T>(actions: (listAction | 'skip')[], xs: T[]): Nested<T> {
-    let xsRest = Array.from(xs);
-    let actionsRest = Array.from(actions);
-    let res: Nested<T> = new Array();
+    const xsRest = Array.from(xs);
+    const actionsRest = Array.from(actions);
+    const res: Nested<T> = new Array();
     while (true) {
         if (actionsRest.length === 0 || xsRest.length === 0) {
             break;
@@ -87,7 +87,7 @@ function groupingFromStartAsBestYouCan<T>(actions: (listAction | 'skip')[], xs: 
             res.push(xsRest.shift() as T);
         } else if (action[0] === 'openParen') {
             // now handle everything until the closing paren
-            let closingIndex = actionsRest.findIndex(c => c[0] === 'closeParen' && c[1] === action[1]);
+            const closingIndex = actionsRest.findIndex(c => c[0] === 'closeParen' && c[1] === action[1]);
             const actionsInner = actionsRest.splice(0, closingIndex);
             const xsInner = xsRest.splice(0, actionsInner.filter(c => c === 'elem' || c === 'skip').length);
             res.push(groupingFromStartAsBestYouCan(actionsInner, xsInner));
@@ -223,7 +223,7 @@ export class NestMap<K, V> {
         });
     }
 
-    private setThere([k, ...ks]: [K, ...K[]], v: V): NestMap<K, V> {
+    private setThere([k, ...ks]: NonEmpty<K>, v: V): NestMap<K, V> {
         if (isNonEmptyArray(ks)) {
             this.getHereOrCreate(k).setThere(ks, v);
         } else {
@@ -232,7 +232,7 @@ export class NestMap<K, V> {
         return this;
     }
 
-    get([k, ...ks]: [K, ...K[]]): Maybe<V> {
+    get([k, ...ks]: NonEmpty<K>): Maybe<V> {
         return this.getHere(k).maybe(Maybe.none(),
             v => {
                 if (isNonEmptyArray(ks)) {
@@ -243,39 +243,39 @@ export class NestMap<K, V> {
             });
     }
 
-    getBestAndRest([k, ...ks]: [K, ...K[]]): Maybe<[V, K[]]> {
+    getBestAndRest([k, ...ks]: NonEmpty<K>): Maybe<[V, K[]]> {
         return Maybe.join(this.getHere(k).map(lr => lr.either(l => Maybe.some([l, ks]), r => {
             if (isNonEmptyArray(ks)) {
                 return r.either(l => l.getBestAndRest(ks), r => r[1].getBestAndRest(ks));
             }
-            return r.either(l => Maybe.none(), rr => Maybe.some([rr[0], []]));
+            return r.either(_ => Maybe.none(), rr => Maybe.some([rr[0], []]));
         })));
     }
 
-    getBestAndRestWithPath(ks: [K, ...K[]]): Maybe<[[K, ...K[]], V, K[]]> {
-        return this.getBestAndRest(ks).map(x => [ks.slice(0, ks.length - x[1].length) as [K, ...K[]], x[0], x[1]]);
+    getBestAndRestWithPath(ks: NonEmpty<K>): Maybe<[NonEmpty<K>, V, K[]]> {
+        return this.getBestAndRest(ks).map(x => [ks.slice(0, ks.length - x[1].length) as NonEmpty<K>, x[0], x[1]]);
     }
 
-    set([k, ...ks]: [K, ...K[]], v: V): NestMap<K, V> {
+    set([k, ...ks]: NonEmpty<K>, v: V): NestMap<K, V> {
         return this.setThere([k, ...ks], v);
     }
 
-    private traverseR<S>(path: [K, ...K[]], start: S, f: (acc: S, ks: [K, ...K[]], v: V) => S): S {
+    private traverseR<S>(path: NonEmpty<K>, start: S, f: (acc: S, ks: NonEmpty<K>, v: V) => S): S {
         for (const [k, v] of this.map) {
             v.either((l: V) => f(start, [...path, k], l), (r: Either<NestMap<K, V>, [V, NestMap<K, V>]>) => r.either(l => l.traverseR([...path, k], start, f),
                 rr => {
-                    let res = f(start, [...path, k], rr[0]);
+                    const res = f(start, [...path, k], rr[0]);
                     return rr[1].traverseR([...path, k], res, f);
                 }));
         }
         return start;
     }
 
-    private traverse<S>(start: S, f: (acc: S, ks: [K, ...K[]], v: V) => S): S {
+    private traverse<S>(start: S, f: (acc: S, ks: NonEmpty<K>, v: V) => S): S {
         for (const [k, v] of this.map) {
             v.either((l: V) => f(start, [k], l), (r: Either<NestMap<K, V>, [V, NestMap<K, V>]>) => r.either(l => l.traverseR([k], start, f),
                 rr => {
-                    let res = f(start, [k], rr[0]);
+                    const res = f(start, [k], rr[0]);
                     return rr[1].traverseR([k], res, f);
                 }));
         }
