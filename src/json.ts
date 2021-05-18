@@ -599,8 +599,6 @@ export const AnyTy = Symbol("AnyTy");
 
 type SchemaBuilder = (...args: TySpec[]) => JsonSchema<any>;
 
-type TySpecMap = NestMap<TySpecBase, SchemaBuilder>;
-
 type DescriptionFn = (...args: TySpec[]) => string;
 
 function tySpecAsGroupedBase(x: TySpec): NonEmptyNested<TySpecBase> {
@@ -628,15 +626,34 @@ function argChecker(spec: TySpec, f: (...args: any[]) => any, maxArgs: undefined
     };
 }
 
+class Spec<T> {
+    private description: Maybe<DescriptionFn>;
+    private builder: Maybe<(...args: TySpec[]) => JsonSchema<T>>;
+
+    constructor(opts: {
+        description?: DescriptionFn,
+        build?: (...args: TySpec[]) => JsonSchema<T>
+    }) {
+        this.description = opts.description === undefined ? Maybe.none() : Maybe.some(opts.description);
+        this.builder = opts.build === undefined ? Maybe.none() : Maybe.some(opts.build);
+    }
+
+    getBuilder(): Maybe<(...args: TySpec[]) => JsonSchema<T>> {
+        return this.builder;
+    }
+
+    getDescriptionFn(): Maybe<DescriptionFn> {
+        return this.description;
+    }
+}
+
 export class Schemas {
-    private schemas: TySpecMap;
     private aliases: NestMap<TySpecBase, TySpec>;
-    private descriptions: NestMap<TySpecBase, DescriptionFn>;
+    private specs: NestMap<TySpecBase, Spec<any>>;
 
     constructor() {
-        this.schemas = new NestMap();
         this.aliases = new NestMap();
-        this.descriptions = new NestMap();
+        this.specs = new NestMap();
     }
 
     addAlias(spec: TySpec, alias: TySpec): Schemas {
@@ -664,47 +681,37 @@ export class Schemas {
         maxArgs?: number
         load?: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)
     }): Schemas {
-        if (opts.description !== undefined) {
-            this.addDescription(spec, opts.description, { maxArgs: opts.maxArgs });
-        }
-        if (opts.load !== undefined) {
-            this.addSchema(spec, opts.load, { maxArgs: opts.maxArgs });
-        }
-        return this;
-    }
-
-    private addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
+        const description = opts.description;
         const s = flattenTySpec(spec);
-        if (schema instanceof JsonSchema) {
-            this.schemas.set(s, () => schema);
-        } else {
-            const checkArgs = argChecker(s, schema, opts.maxArgs);
-            this.schemas.set(s, (...args) => {
-                checkArgs(args);
-                return schema(...args);
-            });
-        }
-        return this;
-    }
 
-    /**
-     * Add a description for the given specification.
-     *
-     * The description may either be a string, or a function that takes a
-     * rendering function and a list of specifications, and produces a string.
-     */
-    private addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
-        const s = flattenTySpec(spec);
+        let descFn: undefined | ((...args: TySpec[]) => string) = undefined;
         if (typeof description === 'string') {
-            this.descriptions.set(s, (..._) => description);
-        } else {
-            const descFn = description(t => this.getDescription(t));
-            const checkArgs = argChecker(s, descFn, opts.maxArgs);
-            this.descriptions.set(s, (...args) => {
+            descFn = (..._) => description;
+        } else if (description !== undefined) {
+            const innerDesc = description(t => this.getDescription(t));
+            const checkArgs = argChecker(s, innerDesc, opts.maxArgs);
+            descFn = (...args) => {
                 checkArgs(args);
-                return descFn(...args);
-            });
+                return innerDesc(...args);
+            };
         }
+
+        let builder: undefined | ((...args: TySpec[]) => JsonSchema<any>) = undefined;
+        const load = opts.load;
+        if (load instanceof JsonSchema) {
+            builder = () => load;
+        } else if (load !== undefined) {
+            const checkArgs = argChecker(s, load, opts.maxArgs);
+            builder = (...args) => {
+                checkArgs(args);
+                return load(...args);
+            };
+        }
+
+        this.specs.set(s, new Spec({
+            description: descFn,
+            build: builder
+        }));
         return this;
     }
 
@@ -714,31 +721,32 @@ export class Schemas {
     }
 
     private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, SchemaBuilder, TySpec[]]> {
-        return this.schemas.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
-            const [path, builder, rest] = x;
-            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
-            return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, builder, args as TySpec[]];
-        });
+        return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getBuilder().map(b => [c[0], b, c[2]])));
     }
 
     /** Get the schema associated with the given specification, if any. */
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
-        return this.mostSpecificSchema(this.resolveAlias(spec))
+        return this.mostSpecificSchema(spec)
             .map(([_, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => f(...args));
     }
 
-    private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
-        return this.descriptions.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
-            const [path, descFn, rest] = x;
-            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
-            return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, descFn, args as TySpec[]];
+    private mostSpecificSpec(spec: TySpec): Maybe<[TySpec, Spec<any>, TySpec[]]> {
+        const resolvedSpec = this.resolveAlias(spec);
+        return this.specs.getBestAndRestWithPath(flattenTySpec(resolvedSpec)).map(x => {
+            const [path, foundSpec, rest] = x;
+            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(resolvedSpec), path, rest);
+            return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, foundSpec, args as TySpec[]];
         });
+    }
+
+    private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
+        return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getDescriptionFn().map(d => [c[0], d, c[2]])));
     }
 
     static _getDescriptionBase(spec: TySpec): string {
         if (spec instanceof Array) {
             if (spec.length == 1) {
-                return tySpecBaseDescription(spec[0]);
+                return Schemas._getDescriptionBase(spec[0]);
             }
             return `[${spec.map(t => Schemas._getDescriptionBase(t)).join(', ')}]`;
         } else {
@@ -747,7 +755,7 @@ export class Schemas {
     }
 
     getDescription(spec: TySpec): string {
-        return this.mostSpecificDescription(this.resolveAlias(spec)).maybef(() => {
+        return this.mostSpecificDescription(spec).maybef(() => {
             if (spec instanceof Array) {
                 return `[${spec.map(t => this.getDescription(t)).join(', ')}]`;
             } else {
@@ -756,23 +764,18 @@ export class Schemas {
         }, c => c[1](...c[2]));
     }
 
-    protected getSchemaMap(): TySpecMap {
-        return this.schemas;
+    protected getSpecMap(): NestMap<TySpecBase, Spec<any>> {
+        return this.specs;
     }
 
     protected getAliasMap(): NestMap<TySpecBase, TySpec> {
         return this.aliases;
     }
 
-    protected getDescriptionMap(): NestMap<TySpecBase, DescriptionFn> {
-        return this.descriptions;
-    }
-
     /** Merge with another schema, favouring definitions in the parameter schema. */
     protected mergeWith(schemas: Schemas) {
-        this.schemas = new NestMap<TySpecBase, SchemaBuilder>().mergeWith(this.schemas).mergeWith(schemas.getSchemaMap());
         this.aliases = new NestMap<TySpecBase, TySpec>().mergeWith(this.aliases).mergeWith(schemas.getAliasMap());
-        this.descriptions = new NestMap<TySpecBase, DescriptionFn>().mergeWith(this.getDescriptionMap()).mergeWith(schemas.getDescriptionMap());
+        this.specs = new NestMap<TySpecBase, Spec<any>>().mergeWith(this.getSpecMap()).mergeWith(schemas.getSpecMap());
     }
 
     static emptySchemas(): Schemas {
