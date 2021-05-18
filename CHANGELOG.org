@@ -15,6 +15,18 @@
     (i.e., includes tests that passed)
 - =parseAs= function for specifying which type to parse JSON
   text into
+- specifiers
+  - =anyOf=
+  - =AnyTy=
+  - =Array=
+  - =Boolean=
+  - =Map= (with string keys)
+  - =null=
+  - =Number=
+  - =Object=
+  - =Set=
+  - =String=
+  - =tuple=
 
 ** Changed
 

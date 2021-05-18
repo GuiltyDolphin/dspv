@@ -2,6 +2,32 @@
 
 Deno module for working with JSON and TypeScript.
 
+* Builtin Specifiers
+
+The following specifiers are supported out-of-the-box:
+
+- =anyOf (...TS)= matches if any of the argument specifiers
+  matches. The result is from the first specifier that matches
+- =AnyTy= matches any type of value and returns it literally
+- =Array (T?)= if =T= is not provided, matches an array of any
+  type of value. If =T= is provided as an argument, it matches
+  an array of the given type instead
+- =Boolean= matches a boolean
+- =Map (String, T2?)?= matches an object whose values match
+  =T2=, and returns this as a =Map= from =String= keys to
+  values produced by =T2=. If =T2= is not provided, it
+  defaults to =AnyTy=
+- =null= matches =null=
+- =Number= matches a number
+- =Object (T?)= matches an object whose values match =T= (or
+  =AnyTy= if =T= is not provided)
+- =Set (T?)= the same as =Array(T)= but converts the value to
+  a =Set=
+- =String= matches a string
+- =tuple (...TS)= matches an array whose length must be the
+  same as =TS= and whose every =ith= element matches the =ith=
+  element of =TS=
+
 * Development
 
 ** Coverage
