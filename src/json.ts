@@ -432,23 +432,24 @@ type JParser<T> = {
     onString: (parser: JsonParser, json: JsonString) => JsonParseResult<T>
 };
 
+function allSchemasSame<T>(f: (parser: JsonParser, value: JsonValue) => JsonParseResult<T>): JParser<T> {
+    return {
+        onArray: f,
+        onBoolean: f,
+        onNull: f,
+        onNumber: f,
+        onObject: f,
+        onString: f,
+    };
+}
+
 /** Schema that specifies how to load a specific class from JSON. */
 export class JsonSchema<T> {
     private objectParser: JParser<T>;
 
     constructor(objectParser: Partial<JParser<T>>) {
-        const failWith: <O extends JsonValue>() => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>() => {
-            return (parser: JsonParser, o: O) => {
-                return parser.failWithTypeError(o);
-            };
-        };
         this.objectParser = {
-            onArray: failWith(),
-            onBoolean: failWith(),
-            onObject: failWith(),
-            onNull: failWith(),
-            onNumber: failWith(),
-            onString: failWith(),
+            ...allSchemasSame((parser, value) => parser.failWithTypeError(value)),
             ...objectParser
         };
     }
@@ -769,17 +770,6 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
 
 /** Matches if any of the specifications match. Matches with the first matching specification. */
 export const anyOf = Symbol("anyOf");
-
-function allSchemasSame(f: (parser: JsonParser, value: JsonValue) => JsonParseResult<unknown>) {
-    return {
-        onArray: f,
-        onBoolean: f,
-        onNull: f,
-        onNumber: f,
-        onObject: f,
-        onString: f,
-    };
-}
 
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
