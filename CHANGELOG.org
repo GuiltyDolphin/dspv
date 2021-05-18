@@ -9,8 +9,17 @@
 
 - make recipes
   - =coverage= for building project coverage
+  - =test_quiet= for running tests and suppressing output of
+    tests that passed
+  - =test_verbose= for running tests with verbose output
+    (i.e., includes tests that passed)
 - =parseAs= function for specifying which type to parse JSON
   text into
+
+** Changed
+
+- =make test= recipe now only outputs information for failing
+  tests
 
 * 0.0.0 - 2021-05-09
 

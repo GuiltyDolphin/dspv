@@ -12,5 +12,6 @@ run =make coverage= in the top-level of the project.
 
 ** Testing
 
-Run =make test= or =deno test= in the top-level of the project
-to run the tests.
+Run =make test= in the top-level of the project to run the
+tests. If you need to see results for tests that passed, run
+=make test_verbose= or =deno test= instead.
