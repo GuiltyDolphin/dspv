@@ -683,6 +683,7 @@ export class Schemas {
         });
     }
 
+    /** Get the schema associated with the given specification, if any. */
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
         return this.mostSpecificSchema(this.resolveAlias(spec))
             .map(([foundSpec, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => {

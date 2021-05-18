@@ -167,6 +167,11 @@ function atLeastOneOfBoth<T1, T2>(x1: T1, x2: T2): AtLeastOneOf<T1, T2> {
 
 type NestMapMap<K, V> = Map<K, AtLeastOneOf<V, NestMap<K, V>>>;
 
+/**
+ * Maps that can be nested.
+ *
+ * These maps are indexed by paths of keys, which are arrays.
+ */
 export class NestMap<K, V> {
     private map: NestMapMap<K, V>;
 
@@ -243,6 +248,11 @@ export class NestMap<K, V> {
             });
     }
 
+    /**
+     * Match as much of the given path as possible, and return the
+     * item found at the end of the path as well as the remaining
+     * path.
+     */
     getBestAndRest([k, ...ks]: NonEmpty<K>): Maybe<[V, K[]]> {
         return Maybe.join(this.getHere(k).map(lr => lr.either(l => Maybe.some([l, ks]), r => {
             if (isNonEmptyArray(ks)) {
@@ -252,6 +262,10 @@ export class NestMap<K, V> {
         })));
     }
 
+    /**
+     * Like {@link getBestAndRest}, but return the path matched in
+     * addition to the remaining path.
+     */
     getBestAndRestWithPath(ks: NonEmpty<K>): Maybe<[NonEmpty<K>, V, K[]]> {
         return this.getBestAndRest(ks).map(x => [ks.slice(0, ks.length - x[1].length) as NonEmpty<K>, x[0], x[1]]);
     }
