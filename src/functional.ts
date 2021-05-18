@@ -172,10 +172,3 @@ export class Either<L, R> implements Functor<R> {
         return Either.right(res);
     }
 }
-
-/** Check if a function would accept a given number of arguments. */
-export function acceptsNumberOfArgs(f: (...args: any) => any, numArgs: number): boolean {
-    return f.toString().match(/^(?:function [^(]*)?(\([^)]*\.\.\.[^)]+\))/)
-        ? numArgs >= f.length
-        : numArgs === f.length;
-}

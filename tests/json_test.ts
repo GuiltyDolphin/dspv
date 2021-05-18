@@ -94,9 +94,8 @@ basic2SchemaMap.addSchema(Basic, basicSchema);
 basic2SchemaMap.addSchema(Basic2, basic2Schema);
 
 const myArraySchemas = Schemas.emptySchemas();
-myArraySchemas.addSchema(MyArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
+myArraySchemas.addSchema(MyArray, (t = AnyTy) => JsonSchema.arraySchema(t, r => new MyArray(r)), { maxArgs: 1 });
 myArraySchemas.addSchema(Basic, basicSchema);
-myArraySchemas.addAlias(MyArray, [MyArray, AnyTy]);
 
 const customArray = Symbol("customArray");
 const customArraySchemas = Schemas.emptySchemas();
@@ -440,28 +439,31 @@ But I don't know how to parse a value for the specification: Empty
 const wants2Args = Symbol("wants2Args");
 const justAString = Symbol("justAString");
 const wantsNoArgs = Symbol("wantsNoArgs");
+const wants2To3Args = Symbol("wants2To3Args");
 
 const errSchema = new Schemas();
 errSchema.addDescription(wants2Args, getDesc => (t1, t2) => `the description with ${getDesc(t1)} and ${getDesc(t2)}`);
 errSchema.addDescription(justAString, "Just a string");
 errSchema.addDescription(wantsNoArgs, _ => () => "wanted no args");
+errSchema.addDescription(wants2To3Args, getDesc => (t1, t2, t3 = AnyTy) => `${getDesc(t1)} and ${getDesc(t2)} and ${getDesc(t3)}`, { maxArgs: 3 });
 const resSchema = JsonSchema.arraySchema([Map, Number, Boolean], t => t);
 errSchema.addSchema(wants2Args, (_t1, _t2) => resSchema);
 errSchema.addSchema(wantsNoArgs, () => JsonSchema.booleanSchema(x => x));
+errSchema.addSchema(wants2To3Args, (_t1, _t2, _t3 = AnyTy) => JsonSchema.booleanSchema(x => x), { maxArgs: 3 });
 
-function testWrongNumberOfSpecArguments(desc: string, f: () => any, spec: TySpec, numActual: number, numExpected: number): Test {
+function testWrongNumberOfSpecArguments(desc: string, f: () => any, spec: TySpec, numActual: number, expected: string): Test {
     return new Test(desc, () => {
         const err = assertThrows(f, Schemas.WrongNumberOfArgumentsError);
-        assertEquals(err.message, `The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} arguments, but expected ${numExpected}`);
+        assertEquals(err.message, `The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} argument${numActual === 1 ? '' : 's'}, but expected ${expected}`);
     });
 }
 
-function testWrongNumberOfDescriptionSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, numExpected: number): Test {
-    return testWrongNumberOfSpecArguments(desc, () => errSchema.getDescription(spec), specExpected, numActual, numExpected);
+function testWrongNumberOfDescriptionSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, expected: string): Test {
+    return testWrongNumberOfSpecArguments(desc, () => errSchema.getDescription(spec), specExpected, numActual, expected);
 }
 
-function testWrongNumberOfSchemaSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, numExpected: number): Test {
-    return testWrongNumberOfSpecArguments(desc, () => errSchema.getSchemaForSpec(spec), specExpected, numActual, numExpected);
+function testWrongNumberOfSchemaSpecArguments(desc: string, spec: TySpec, specExpected: TySpec, numActual: number, expected: string): Test {
+    return testWrongNumberOfSpecArguments(desc, () => errSchema.getSchemaForSpec(spec), specExpected, numActual, expected);
 }
 
 function testGetDescriptionOkay(desc: string, spec: TySpec, expected: string): Test {
@@ -479,29 +481,43 @@ function testGetSchemaOkay(desc: string, spec: TySpec, expected: JsonSchema<any>
 testGroup("Schemas",
     testGroup("getDescription",
         testGroup("too few spec arguments",
-            testWrongNumberOfDescriptionSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 2),
-            testWrongNumberOfDescriptionSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 2),
+            testGroup("wants2Args",
+                testWrongNumberOfDescriptionSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 'exactly 2'),
+                testWrongNumberOfDescriptionSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 'exactly 2'),
+            ),
+            testWrongNumberOfDescriptionSpecArguments("wants2To3Args: 1 instead of 2", [wants2To3Args, Number], wants2To3Args, 1, 'at least 2 and at most 3'),
         ),
         testGroup("correct number of spec arguments",
-            testGetDescriptionOkay("with function", [wants2Args, Number, Boolean], "the description with Number and Boolean"),
-            testGetDescriptionOkay("0 with function", wantsNoArgs, "wanted no args"),
-            testGetDescriptionOkay("0 with string", justAString, "Just a string"),
-            testGetDescriptionOkay("1 with string", [justAString, Number], "Just a string"),
+            testGroup("justAString",
+                testGetDescriptionOkay("0 args", justAString, "Just a string"),
+                testGetDescriptionOkay("1 arg", [justAString, Number], "Just a string"),
+            ),
+            testGetDescriptionOkay("wants2Args: 2 args", [wants2Args, Number, Boolean], "the description with Number and Boolean"),
+            testGetDescriptionOkay("wantsNoArgs: 0 args", wantsNoArgs, "wanted no args"),
+            testGroup("wants2To3Args",
+                testGetDescriptionOkay("2 args", [wants2To3Args, Number, Boolean], "Number and Boolean and Symbol(AnyTy)"),
+                testGetDescriptionOkay("3 args", [wants2To3Args, Number, Boolean, String], "Number and Boolean and String"),
+            ),
         ),
         testGroup("too many spec arguments",
-            testWrongNumberOfDescriptionSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 2),
-            testWrongNumberOfDescriptionSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 0),
+            testWrongNumberOfDescriptionSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 'exactly 2'),
+            testWrongNumberOfDescriptionSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 'exactly 0'),
+            testWrongNumberOfDescriptionSpecArguments("4 instead of 3", [wants2To3Args, Number, Boolean, String, null], wants2To3Args, 4, 'at least 2 and at most 3'),
         ),
     ),
     testGroup("getSchemaForSpec",
         testGroup("too few spec arguments",
-            testWrongNumberOfSchemaSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 2),
-            testWrongNumberOfSchemaSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 2),
+            testGroup("wants2Args",
+                testWrongNumberOfSchemaSpecArguments("0 instead of 2", wants2Args, wants2Args, 0, 'exactly 2'),
+                testWrongNumberOfSchemaSpecArguments("1 instead of 2", [wants2Args, Number], wants2Args, 1, 'exactly 2'),
+            ),
+            testWrongNumberOfSchemaSpecArguments("wants2To3Args: 1 instead of 2", [wants2To3Args, Number], wants2To3Args, 1, 'at least 2 and at most 3'),
         ),
         testGetSchemaOkay("correct number of spec arguments", [wants2Args, Number, Boolean], resSchema),
         testGroup("too many spec arguments",
-            testWrongNumberOfSchemaSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 0),
-            testWrongNumberOfSchemaSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 2),
+            testWrongNumberOfSchemaSpecArguments("1 instead of 0", [wantsNoArgs, Number], wantsNoArgs, 1, 'exactly 0'),
+            testWrongNumberOfSchemaSpecArguments("3 instead of 2", [wants2Args, Number, Boolean, String], wants2Args, 3, 'exactly 2'),
+            testWrongNumberOfSchemaSpecArguments("4 instead of 3", [wants2To3Args, Number, Boolean, String, null], wants2To3Args, 4, 'at least 2 and at most 3'),
         ),
     ),
 ).runAsMain();

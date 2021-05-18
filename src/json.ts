@@ -1,7 +1,5 @@
 import { Either, Maybe } from './deps.ts';
 
-import { acceptsNumberOfArgs } from './functional.ts';
-
 import {
     flattenNonEmpty,
     groupingStartAndEnd,
@@ -616,6 +614,20 @@ function flattenTySpec(x: TySpec): NonEmpty<TySpecBase> {
     return flattenNonEmpty(tySpecAsGroupedBase(x));
 }
 
+function hasRestParameter(f: (...args: any[]) => any): boolean {
+    return f.toString().match(/^(?:function [^(]*)?(\([^)]*\.\.\.[^.) ]+\))/) ? true : false;
+}
+
+function argChecker(spec: TySpec, f: (...args: any[]) => any, maxArgs: undefined | number) {
+    const maxNumOfArgs = maxArgs !== undefined ? maxArgs : hasRestParameter(f) ? Infinity : f.length;
+    const minArgs = f.length;
+    return (args: any[]) => {
+        if (args.length > maxNumOfArgs || args.length < minArgs) {
+            throw new Schemas.WrongNumberOfArgumentsError(spec, args.length, minArgs, maxNumOfArgs);
+        }
+    };
+}
+
 export class Schemas {
     private schemas: TySpecMap;
     private aliases: NestMap<TySpecBase, TySpec>;
@@ -632,12 +644,16 @@ export class Schemas {
         return this;
     }
 
-    addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)): Schemas {
+    addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
         const s = flattenTySpec(spec);
         if (schema instanceof JsonSchema) {
             this.schemas.set(s, () => schema);
         } else {
-            this.schemas.set(s, schema);
+            const checkArgs = argChecker(s, schema, opts.maxArgs);
+            this.schemas.set(s, (...args) => {
+                checkArgs(args);
+                return schema(...args);
+            });
         }
         return this;
     }
@@ -648,12 +664,17 @@ export class Schemas {
      * The description may either be a string, or a function that takes a
      * rendering function and a list of specifications, and produces a string.
      */
-    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string)): Schemas {
+    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
         const s = flattenTySpec(spec);
         if (typeof description === 'string') {
             this.descriptions.set(s, (..._) => description);
         } else {
-            this.descriptions.set(s, description(t => this.getDescription(t)));
+            const descFn = description(t => this.getDescription(t));
+            const checkArgs = argChecker(s, descFn, opts.maxArgs);
+            this.descriptions.set(s, (...args) => {
+                checkArgs(args);
+                return descFn(...args);
+            });
         }
         return this;
     }
@@ -674,12 +695,7 @@ export class Schemas {
     /** Get the schema associated with the given specification, if any. */
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
         return this.mostSpecificSchema(this.resolveAlias(spec))
-            .map(([foundSpec, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => {
-                if (!acceptsNumberOfArgs(f, args.length)) {
-                    throw new Schemas.WrongNumberOfArgumentsError(foundSpec, args.length, f.length);
-                }
-                return f(...args);
-            });
+            .map(([_, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => f(...args));
     }
 
     private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
@@ -692,6 +708,9 @@ export class Schemas {
 
     static _getDescriptionBase(spec: TySpec): string {
         if (spec instanceof Array) {
+            if (spec.length == 1) {
+                return tySpecBaseDescription(spec[0]);
+            }
             return `[${spec.map(t => Schemas._getDescriptionBase(t)).join(', ')}]`;
         } else {
             return tySpecBaseDescription(spec);
@@ -705,13 +724,7 @@ export class Schemas {
             } else {
                 return tySpecBaseDescription(spec);
             }
-        }, c => {
-            const [foundSpec, descFn, args] = c;
-            if (!acceptsNumberOfArgs(descFn, args.length)) {
-                throw new Schemas.WrongNumberOfArgumentsError(foundSpec, args.length, descFn.length);
-            }
-            return descFn(...args)
-        });
+        }, c => c[1](...c[2]));
     }
 
     protected getSchemaMap(): TySpecMap {
@@ -745,8 +758,12 @@ export class Schemas {
     }
 
     static WrongNumberOfArgumentsError = class extends TypeError {
-        constructor(spec: TySpec, numActual: number, numExpected: number) {
-            super(`The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} arguments, but expected ${numExpected}`);
+        constructor(spec: TySpec, numActual: number, minExpected?: number, maxExpected?: number) {
+            const minStr = minExpected ? "at least " + minExpected : "";
+            const maxStr = maxExpected !== undefined && maxExpected !== Infinity ? "at most " + maxExpected : "";
+            const expStr = minExpected == maxExpected && minExpected !== undefined
+                ? "exactly " + minExpected : minStr && maxStr ? minStr + " and " + maxStr : minStr + maxStr;
+            super(`The specification ${Schemas._getDescriptionBase(spec)} was given ${numActual} argument${numActual === 1 ? '' : 's'}, but expected ${expStr}`);
         }
     }
 }
@@ -786,24 +803,20 @@ function defaultSchema(): Schemas {
             onString: JsonSchema.genStringSchema(s => s),
         }))
         .addDescription(AnyTy, 'anything')
-        .addSchema(Array, (t) => JsonSchema.arraySchema(t, r => r))
-        .addDescription(Array, getDesc => t => 'Array of ' + getDesc(t))
-        .addAlias(Array, [Array, AnyTy])
+        .addSchema(Array, (t: TySpec = AnyTy) => JsonSchema.arraySchema(t, r => r), { maxArgs: 1 })
+        .addDescription(Array, getDesc => (t = AnyTy) => 'Array of ' + getDesc(t), { maxArgs: 1 })
         .addSchema(Boolean, JsonSchema.booleanSchema(x => x))
         .addDescription(Boolean, 'boolean')
-        .addSchema([Map, String], t => JsonSchema.objectSchemaMap(_ => t, r => r))
-        .addDescription([Map, String], getDesc => t => "Map with string keys and values matching " + getDesc(t))
+        .addSchema([Map, String], (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => r), { maxArgs: 1 })
+        .addDescription([Map, String], getDesc => (t = AnyTy) => "Map with string keys and values matching " + getDesc(t), { maxArgs: 1 })
         .addAlias(Map, [Map, String])
-        .addAlias([Map, String], [Map, String, AnyTy])
         .addSchema(null, JsonSchema.nullSchema(x => x))
         .addDescription(null, 'null')
         .addSchema(Number, JsonSchema.numberSchema(x => x))
         .addDescription(Number, 'number')
-        .addSchema(Object, t => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)))
-        .addDescription(Object, getDesc => t => 'Object whose values are ' + getDesc(t))
-        .addAlias(Object, [Object, AnyTy])
-        .addSchema(Set, (t) => JsonSchema.arraySchema(t, r => new Set(r)))
-        .addAlias(Set, [Set, AnyTy])
+        .addSchema(Object, (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)), { maxArgs: 1 })
+        .addDescription(Object, getDesc => (t = AnyTy) => 'Object whose values are ' + getDesc(t), { maxArgs: 1 })
+        .addSchema(Set, (t = AnyTy) => JsonSchema.arraySchema(t, r => new Set(r)), { maxArgs: 1 })
         .addSchema(String, JsonSchema.stringSchema(x => x))
         .addDescription(String, 'string')
         .addSchema(tuple, (...tys) => JsonSchema.customSchema({
