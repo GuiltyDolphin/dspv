@@ -321,9 +321,9 @@ export class JsonParser {
         return JsonParser.failParse(new JsonParser.MissingKeysError(context, missingKeys));
     }
 
-    failWithTypeError<T>(o: JsonValue): JsonParseResult<T> {
+    failWithTypeError<T>(tyDesc: string): JsonParseResult<T> {
         const context = this.checkParsingOrFail();
-        return JsonParser.failParse(new JsonParser.JsonTypeError(context, o));
+        return JsonParser.failParse(new JsonParser.JsonTypeError(context, tyDesc));
     }
 
     failWithUnknownKeys<T>(unknownKeys: string[]): JsonParseResult<T> {
@@ -384,12 +384,8 @@ export class JsonParser {
     }
 
     static JsonTypeError = class extends JsonParseError {
-        private value: JsonValue;
-
-        constructor(context: ParseContext, value: JsonValue) {
-            super(context, `But this is a ${value.getType()}`);
-
-            this.value = value;
+        constructor(context: ParseContext, actualTyDesc: string) {
+            super(context, `But this is a ${actualTyDesc}`);
         }
     }
 
@@ -449,7 +445,7 @@ export class JsonSchema<T> {
 
     constructor(objectParser: Partial<JParser<T>>) {
         this.objectParser = {
-            ...allSchemasSame((parser, value) => parser.failWithTypeError(value)),
+            ...allSchemasSame((parser, value) => parser.failWithTypeError(value.getType())),
             ...objectParser
         };
     }
@@ -771,6 +767,9 @@ function mapToObject<T>(m: Map<string, T>): { [k: string]: T } {
 /** Matches if any of the specifications match. Matches with the first matching specification. */
 export const anyOf = Symbol("anyOf");
 
+/** [tuple, t1, ..., tn] matches an array of length n whose ith element matches ti. */
+export const tuple = Symbol("tuple");
+
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
         .addSchema(anyOf, (...tys) => JsonSchema.customSchema(allSchemasSame(
@@ -781,7 +780,7 @@ function defaultSchema(): Schemas {
                         return res;
                     }
                 }
-                return parser.failWithTypeError(json);
+                return parser.failWithTypeError(json.getType());
             })))
         .addSchema(AnyTy, JsonSchema.customSchema({
             onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
@@ -811,12 +810,30 @@ function defaultSchema(): Schemas {
         .addSchema(Set, (t) => JsonSchema.arraySchema(t, r => new Set(r)))
         .addAlias(Set, [Set, AnyTy])
         .addSchema(String, JsonSchema.stringSchema(x => x))
-        .addDescription(String, 'string');
+        .addDescription(String, 'string')
+        .addSchema(tuple, (...tys) => JsonSchema.customSchema({
+            onArray: (parser, val) => {
+                const arr = val.unwrap();
+                if (arr.length !== tys.length) {
+                    return parser.failWithTypeError(`array of length ${arr.length}`);
+                }
+                const res = [];
+                for (let i = 0; i < arr.length; i++) {
+                    const loaded = parser.loadAs(arr[i], tys[i]);
+                    if (loaded.isLeft()) {
+                        return loaded;
+                    } else {
+                        res[i] = loaded.unwrapRight();
+                    }
+                }
+                return Either.right(res);
+            }
+        }))
 }
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
 type TySpecBase = symbol | null | Constructor
-export type TySpec = TySpecBase | [TySpecBase, TySpec, ...TySpec[]];
+export type TySpec = TySpecBase | [TySpecBase, ...TySpec[]];
 
 function tySpecBaseDescription(t: TySpecBase): string {
     if (typeof t === 'symbol') {

@@ -4,7 +4,8 @@ export {
     JsonParseError,
     JsonParser,
     JsonSchema,
-    Schemas
+    Schemas,
+    tuple,
 } from "./src/json.ts";
 
 export type {
