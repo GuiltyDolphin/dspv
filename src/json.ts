@@ -830,14 +830,7 @@ function defaultSchema(): Schemas {
         })
         .addSpec(AnyTy, {
             description: 'anything',
-            load: JsonSchema.customSchema({
-                onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
-                onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),
-                onNull: JsonSchema.genNullSchema(t => t),
-                onNumber: JsonSchema.genNumberSchema(t => t),
-                onObject: JsonSchema.genObjectMapSchema(_ => AnyTy, r => mapToObject<JsonValueRaw>(r)),
-                onString: JsonSchema.genStringSchema(s => s),
-            })
+            load: () => JsonSchema.customSchema(allSchemasSame((_parser, json) => JsonParser.parseOk(json.unwrapFully())))
         })
         .addSpec(Array, {
             maxArgs: 1,
