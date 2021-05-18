@@ -321,9 +321,9 @@ export class JsonParser {
         return JsonParser.failParse(new JsonParser.MissingKeysError(context, missingKeys));
     }
 
-    failWithTypeError<T>(actualTyDesc: string, o: JsonValue): JsonParseResult<T> {
+    failWithTypeError<T>(o: JsonValue): JsonParseResult<T> {
         const context = this.checkParsingOrFail();
-        return JsonParser.failParse(new JsonParser.JsonTypeError(context, actualTyDesc, o));
+        return JsonParser.failParse(new JsonParser.JsonTypeError(context, o));
     }
 
     failWithUnknownKeys<T>(unknownKeys: string[]): JsonParseResult<T> {
@@ -384,15 +384,11 @@ export class JsonParser {
     }
 
     static JsonTypeError = class extends JsonParseError {
-        private actualTy: string;
         private value: JsonValue;
 
-        constructor(context: ParseContext, actualTy: string, value: JsonValue) {
+        constructor(context: ParseContext, value: JsonValue) {
+            super(context, `But this is a ${value.getType()}`);
 
-            const vstr = value instanceof GenJsonValue ? value.toJsonString() : JSON.stringify(value);
-            super(context, `But this is a ${actualTy}`);
-
-            this.actualTy = actualTy;
             this.value = value;
         }
     }
@@ -441,18 +437,18 @@ export class JsonSchema<T> {
     private objectParser: JParser<T>;
 
     constructor(objectParser: Partial<JParser<T>>) {
-        const failWith: <O extends JsonValue>(tyDesc: string) => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>(tyDesc: string) => {
+        const failWith: <O extends JsonValue>() => (_parser: JsonParser, o: O) => JsonParseResult<T> = <O extends JsonValue>() => {
             return (parser: JsonParser, o: O) => {
-                return parser.failWithTypeError(tyDesc, o);
+                return parser.failWithTypeError(o);
             };
         };
         this.objectParser = {
-            onArray: failWith('array'),
-            onBoolean: failWith('boolean'),
-            onObject: failWith('object'),
-            onNull: failWith('null'),
-            onNumber: failWith('number'),
-            onString: failWith('string'),
+            onArray: failWith(),
+            onBoolean: failWith(),
+            onObject: failWith(),
+            onNull: failWith(),
+            onNumber: failWith(),
+            onString: failWith(),
             ...objectParser
         };
     }
@@ -795,7 +791,7 @@ function defaultSchema(): Schemas {
                         return res;
                     }
                 }
-                return parser.failWithTypeError(json.getType(), json);
+                return parser.failWithTypeError(json);
             })))
         .addSchema(AnyTy, JsonSchema.customSchema({
             onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
