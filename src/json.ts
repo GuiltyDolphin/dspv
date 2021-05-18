@@ -257,6 +257,10 @@ export class JsonParseError extends Error {
 
 export type JsonParseResult<T> = Either<JsonParseError, T>;
 
+function determinerFor(s: string): string {
+    return s.match('^[aoeiu]') ? 'an' : 'a';
+}
+
 export class JsonParser {
 
     private schemas: Schemas;
@@ -385,7 +389,7 @@ export class JsonParser {
 
     static JsonTypeError = class extends JsonParseError {
         constructor(context: ParseContext, actualTyDesc: string) {
-            super(context, `But this is a ${actualTyDesc}`);
+            super(context, `But this is ${determinerFor(actualTyDesc)} ${actualTyDesc}`);
         }
     }
 

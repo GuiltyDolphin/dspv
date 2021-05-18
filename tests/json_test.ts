@@ -314,10 +314,11 @@ But the following keys are required and were not specified: ${keys.map(k => JSON
 
 function assertParseFailsWithTypeError(description: string, parser: JsonParser, toParse: string, spec: TySpec, expectedTy: TySpec, actualTy: string, value: any) {
     return new Test(description, () => {
+        const determiner = actualTy.match('^[aoeiu]') ? 'an' : 'a';
         assertParseFailsWith(parser, toParse, spec, JsonParser.JsonTypeError,
             `When trying to read a value for specification: ${parser._getDescriptionForSpec(expectedTy)}
 I saw: ${JSON.stringify(value)}
-But this is a ${actualTy}`)
+But this is ${determiner} ${actualTy}`)
     });
 }
 
@@ -359,6 +360,23 @@ When trying to read a value for specification: number
 I saw: true
 But this is a boolean
 `, true),
+        testGroup("correct determiner",
+            testParseAsOrThrowFails("for array", '[]', [Object, Number], JsonParser.JsonTypeError, `
+When trying to read a value for specification: Object whose values are number
+I saw: []
+But this is an array
+`, true),
+            testParseAsOrThrowFails("for object", '{}', [Array, AnyTy], JsonParser.JsonTypeError, `
+When trying to read a value for specification: Array of anything
+I saw: {}
+But this is an object
+`, true),
+            testParseAsOrThrowFails("for string", '""', [Array, AnyTy], JsonParser.JsonTypeError, `
+When trying to read a value for specification: Array of anything
+I saw: ""
+But this is a string
+`, true),
+        ),
     ),
 
     testGroup("missing keys",
