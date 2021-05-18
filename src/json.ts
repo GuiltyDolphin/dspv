@@ -644,7 +644,36 @@ export class Schemas {
         return this;
     }
 
-    addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
+    /**
+     * Add a specifier.
+     *
+     * 'description' may either be a string, or a function that takes
+     * a rendering function and a list of specifications, and produces
+     * a string.
+     *
+     * 'load' describes how to load a value.
+     *
+     * 'maxArgs' should be the maximum number of argument specifiers
+     * supported, and 'description' and 'load' should support being
+     * passed this many arguments. If maxArgs is not provided, then
+     * the number of mandatory arguments is used, or Infinity if a
+     * rest argument exists.
+     */
+    addSpec<T>(spec: TySpec, opts: {
+        description?: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string),
+        maxArgs?: number
+        load?: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)
+    }): Schemas {
+        if (opts.description !== undefined) {
+            this.addDescription(spec, opts.description, { maxArgs: opts.maxArgs });
+        }
+        if (opts.load !== undefined) {
+            this.addSchema(spec, opts.load, { maxArgs: opts.maxArgs });
+        }
+        return this;
+    }
+
+    private addSchema<T>(spec: TySpec, schema: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
         const s = flattenTySpec(spec);
         if (schema instanceof JsonSchema) {
             this.schemas.set(s, () => schema);
@@ -664,7 +693,7 @@ export class Schemas {
      * The description may either be a string, or a function that takes a
      * rendering function and a list of specifications, and produces a string.
      */
-    addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
+    private addDescription(spec: TySpec, description: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string), opts: { maxArgs?: number } = { maxArgs: undefined }): Schemas {
         const s = flattenTySpec(spec);
         if (typeof description === 'string') {
             this.descriptions.set(s, (..._) => description);
@@ -784,59 +813,85 @@ export const tuple = Symbol("tuple");
 
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
-        .addSchema(anyOf, (...tys) => JsonSchema.customSchema(allSchemasSame(
-            (parser, json) => {
-                for (const ty of tys) {
-                    const res = parser.loadAs(json, ty);
-                    if (res.isRight()) {
-                        return res;
+        .addSpec(anyOf, {
+            load: (...tys) => JsonSchema.customSchema(allSchemasSame(
+                (parser, json) => {
+                    for (const ty of tys) {
+                        const res = parser.loadAs(json, ty);
+                        if (res.isRight()) {
+                            return res;
+                        }
                     }
-                }
-                return parser.failWithTypeError(json.getType());
-            })))
-        .addSchema(AnyTy, JsonSchema.customSchema({
-            onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
-            onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),
-            onNull: JsonSchema.genNullSchema(t => t),
-            onNumber: JsonSchema.genNumberSchema(t => t),
-            onObject: JsonSchema.genObjectMapSchema(_ => AnyTy, r => mapToObject<JsonValueRaw>(r)),
-            onString: JsonSchema.genStringSchema(s => s),
-        }))
-        .addDescription(AnyTy, 'anything')
-        .addSchema(Array, (t: TySpec = AnyTy) => JsonSchema.arraySchema(t, r => r), { maxArgs: 1 })
-        .addDescription(Array, getDesc => (t = AnyTy) => 'Array of ' + getDesc(t), { maxArgs: 1 })
-        .addSchema(Boolean, JsonSchema.booleanSchema(x => x))
-        .addDescription(Boolean, 'boolean')
-        .addSchema([Map, String], (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => r), { maxArgs: 1 })
-        .addDescription([Map, String], getDesc => (t = AnyTy) => "Map with string keys and values matching " + getDesc(t), { maxArgs: 1 })
+                    return parser.failWithTypeError(json.getType());
+                }))
+        })
+        .addSpec(AnyTy, {
+            description: 'anything',
+            load: JsonSchema.customSchema({
+                onArray: JsonSchema.genArraySchema(AnyTy, x => x as JsonValueRaw[]),
+                onBoolean: JsonSchema.genBooleanSchema(t => t as JsonValueRaw),
+                onNull: JsonSchema.genNullSchema(t => t),
+                onNumber: JsonSchema.genNumberSchema(t => t),
+                onObject: JsonSchema.genObjectMapSchema(_ => AnyTy, r => mapToObject<JsonValueRaw>(r)),
+                onString: JsonSchema.genStringSchema(s => s),
+            })
+        })
+        .addSpec(Array, {
+            maxArgs: 1,
+            description: getDesc => (t = AnyTy) => 'Array of ' + getDesc(t),
+            load: (t: TySpec = AnyTy) => JsonSchema.arraySchema(t, r => r)
+        })
+        .addSpec(Boolean, {
+            description: 'boolean',
+            load: JsonSchema.booleanSchema(x => x)
+        })
+        .addSpec([Map, String], {
+            maxArgs: 1,
+            description: getDesc => (t = AnyTy) => "Map with string keys and values matching " + getDesc(t),
+            load: (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => r)
+        })
         .addAlias(Map, [Map, String])
-        .addSchema(null, JsonSchema.nullSchema(x => x))
-        .addDescription(null, 'null')
-        .addSchema(Number, JsonSchema.numberSchema(x => x))
-        .addDescription(Number, 'number')
-        .addSchema(Object, (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r)), { maxArgs: 1 })
-        .addDescription(Object, getDesc => (t = AnyTy) => 'Object whose values are ' + getDesc(t), { maxArgs: 1 })
-        .addSchema(Set, (t = AnyTy) => JsonSchema.arraySchema(t, r => new Set(r)), { maxArgs: 1 })
-        .addSchema(String, JsonSchema.stringSchema(x => x))
-        .addDescription(String, 'string')
-        .addSchema(tuple, (...tys) => JsonSchema.customSchema({
-            onArray: (parser, val) => {
-                const arr = val.unwrap();
-                if (arr.length !== tys.length) {
-                    return parser.failWithTypeError(`array of length ${arr.length}`);
-                }
-                const res = [];
-                for (let i = 0; i < arr.length; i++) {
-                    const loaded = parser.loadAs(arr[i], tys[i]);
-                    if (loaded.isLeft()) {
-                        return loaded;
-                    } else {
-                        res[i] = loaded.unwrapRight();
+        .addSpec(null, {
+            description: 'null',
+            load: JsonSchema.nullSchema(x => x)
+        })
+        .addSpec(Number, {
+            description: 'number',
+            load: JsonSchema.numberSchema(x => x)
+        })
+        .addSpec(Object, {
+            maxArgs: 1,
+            description: getDesc => (t = AnyTy) => 'Object whose values are ' + getDesc(t),
+            load: (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => mapToObject(r))
+        })
+        .addSpec(Set, {
+            maxArgs: 1,
+            load: (t = AnyTy) => JsonSchema.arraySchema(t, r => new Set(r)),
+        })
+        .addSpec(String, {
+            description: 'string',
+            load: JsonSchema.stringSchema(x => x)
+        })
+        .addSpec(tuple, {
+            load: (...tys) => JsonSchema.customSchema({
+                onArray: (parser, val) => {
+                    const arr = val.unwrap();
+                    if (arr.length !== tys.length) {
+                        return parser.failWithTypeError(`array of length ${arr.length}`);
                     }
+                    const res = [];
+                    for (let i = 0; i < arr.length; i++) {
+                        const loaded = parser.loadAs(arr[i], tys[i]);
+                        if (loaded.isLeft()) {
+                            return loaded;
+                        } else {
+                            res[i] = loaded.unwrapRight();
+                        }
+                    }
+                    return Either.right(res);
                 }
-                return Either.right(res);
-            }
-        }))
+            })
+        })
 }
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */

@@ -87,22 +87,27 @@ class MyArray<T> {
 }
 
 const basicSchemas = Schemas.emptySchemas();
-basicSchemas.addSchema(Basic, basicSchema);
+basicSchemas.addSpec(Basic, { load: basicSchema });
 
 const basic2SchemaMap = Schemas.emptySchemas();
-basic2SchemaMap.addSchema(Basic, basicSchema);
-basic2SchemaMap.addSchema(Basic2, basic2Schema);
+basic2SchemaMap.addSpec(Basic, { load: basicSchema });
+basic2SchemaMap.addSpec(Basic2, { load: basic2Schema });
 
 const myArraySchemas = Schemas.emptySchemas();
-myArraySchemas.addSchema(MyArray, (t = AnyTy) => JsonSchema.arraySchema(t, r => new MyArray(r)), { maxArgs: 1 });
-myArraySchemas.addSchema(Basic, basicSchema);
+myArraySchemas.addSpec(MyArray, {
+    maxArgs: 1,
+    load: (t = AnyTy) => JsonSchema.arraySchema(t, r => new MyArray(r))
+});
+myArraySchemas.addSpec(Basic, { load: basicSchema });
 
 const customArray = Symbol("customArray");
 const customArraySchemas = Schemas.emptySchemas();
-customArraySchemas.addSchema(customArray, (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r)));
-customArraySchemas.addDescription(customArray, 'custom array');
+customArraySchemas.addSpec(customArray, {
+    description: 'custom array',
+    load: (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r))
+});
 customArraySchemas.addAlias(customArray, [customArray, AnyTy]);
-customArraySchemas.addSchema(Basic, basicSchema);
+customArraySchemas.addSpec(Basic, { load: basicSchema });
 
 const alwaysEmptyArray = Symbol('alwaysEmptyArray');
 const negatedBoolean = Symbol('negatedBoolean');
@@ -111,12 +116,12 @@ const alwaysZero = Symbol('alwaysZero');
 const alwaysEmptyObject = Symbol('alwaysEmptyObject');
 const alwaysEmptyString = Symbol('alwaysEmptyString');
 const extraSchemas = Schemas.emptySchemas()
-    .addSchema(alwaysEmptyArray, JsonSchema.arraySchema(AnyTy, _ => []))
-    .addSchema(negatedBoolean, JsonSchema.booleanSchema(r => !r))
-    .addSchema(nullBecomes5, JsonSchema.nullSchema(_ => 5))
-    .addSchema(alwaysZero, JsonSchema.numberSchema(_ => 0))
-    .addSchema(alwaysEmptyObject, JsonSchema.objectSchemaMap(_ => AnyTy, _ => new Object()))
-    .addSchema(alwaysEmptyString, JsonSchema.stringSchema(_ => ""))
+    .addSpec(alwaysEmptyArray, { load: JsonSchema.arraySchema(AnyTy, _ => []) })
+    .addSpec(negatedBoolean, { load: JsonSchema.booleanSchema(r => !r) })
+    .addSpec(nullBecomes5, { load: JsonSchema.nullSchema(_ => 5) })
+    .addSpec(alwaysZero, { load: JsonSchema.numberSchema(_ => 0) })
+    .addSpec(alwaysEmptyObject, { load: JsonSchema.objectSchemaMap(_ => AnyTy, _ => new Object()) })
+    .addSpec(alwaysEmptyString, { load: JsonSchema.stringSchema(_ => "") })
 
 const parserBasic = new JsonParser(basicSchemas);
 const basic2Parser = new JsonParser(basic2SchemaMap);
@@ -342,8 +347,10 @@ testGroup("errors",
     testGroup("type error",
         assertParseFailsWithTypeError("expected boolean but got number, correct error", basicParser, '1', Boolean, Boolean, 'number', 1),
         assertParseFailsWithTypeError("expected Empty but got number, correct error",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-            }, (_) => new Empty()))), `1`, Empty, Empty, 'number', 1),
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                }, (_) => new Empty())
+            })), `1`, Empty, Empty, 'number', 1),
         assertParseFailsWithTypeError("wrong field type, expected boolean but got number, correct error", basicParser, `{ "p": 1 }`, [Object, Boolean], Boolean, 'number', 1),
 
         testParseAsOrThrowFails("arrays are wrapped in brackets and have commas in error message", '[1, 2]', Boolean, JsonParser.JsonTypeError, "I saw: [1,2]"),
@@ -382,18 +389,22 @@ But this is a string
 
     testGroup("missing keys",
         assertParseFailsWithMissingKeys("correct error",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p1: Boolean,
-                p2: Number,
-                p3: null
-            }, (_) => new Empty()))), `{ "p2": 1 } `, Empty, ['p1', 'p3']),
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p1: Boolean,
+                    p2: Number,
+                    p3: null
+                }, (_) => new Empty())
+            })), `{ "p2": 1 } `, Empty, ['p1', 'p3']),
 
         testParseAsOrThrowFailsWithParser(
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p1: Boolean,
-                p2: Number,
-                p3: null
-            }, (_) => new Empty()))), "correct string for error", `{ "p2": 1 }`, Empty, JsonParser.MissingKeysError, `
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p1: Boolean,
+                    p2: Number,
+                    p3: null
+                }, (_) => new Empty())
+            })), "correct string for error", `{ "p2": 1 }`, Empty, JsonParser.MissingKeysError, `
 When trying to read a value for specification: Empty
 I saw: {"p2":1}
 But the following keys are required and were not specified: "p1", "p3"
@@ -402,14 +413,18 @@ But the following keys are required and were not specified: "p1", "p3"
 
     testGroup("unknown keys",
         assertParseFailsWithUnknownKeys("correct error",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p2: Number,
-            }, (_) => new Empty()))), `{ "p1": true, "p2": 1, "p3": null } `, Empty, ['p1', 'p3']),
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p2: Number,
+                }, (_) => new Empty())
+            })), `{ "p1": true, "p2": 1, "p3": null } `, Empty, ['p1', 'p3']),
 
         testParseAsOrThrowFailsWithParser(
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p2: Number,
-            }, (_) => new Empty()))), "correct string for error", `{ "p1": true, "p2": 1, "p3": null } `, Empty, JsonParser.UnknownKeysError, `
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p2: Number,
+                }, (_) => new Empty())
+            })), "correct string for error", `{ "p1": true, "p2": 1, "p3": null } `, Empty, JsonParser.UnknownKeysError, `
 When trying to read a value for specification: Empty
 I saw: {"p1":true,"p2":1,"p3":null}
 But I saw the following keys which are not accepted by the specification: "p1", "p3"
@@ -425,13 +440,17 @@ But I don't know how to parse a value for the specification: Empty
 `, true),
         assertParseFailsWithUnknownSpec("in array", new JsonParser(), '[1]', [Array, Empty], 'Empty'),
         assertParseFailsWithUnknownSpec("in other specification",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p1: Basic,
-            }, (_) => new Empty()))), `{ "p1": 1 } `, Empty, 'Basic'),
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p1: Basic,
+                }, (_) => new Empty())
+            })), `{ "p1": 1 } `, Empty, 'Basic'),
         assertParseFailsWithUnknownSpec("nested",
-            new JsonParser(Schemas.emptySchemas().addSchema(Empty, JsonSchema.objectSchema<Empty>({
-                p1: [Basic, Empty],
-            }, (_) => new Empty()))), `{ "p1": 1 } `, Empty, '[Basic, Empty]')
+            new JsonParser(Schemas.emptySchemas().addSpec(Empty, {
+                load: JsonSchema.objectSchema<Empty>({
+                    p1: [Basic, Empty],
+                }, (_) => new Empty())
+            })), `{ "p1": 1 } `, Empty, '[Basic, Empty]')
     ),
 ).runAsMain();
 
@@ -440,16 +459,25 @@ const wants2Args = Symbol("wants2Args");
 const justAString = Symbol("justAString");
 const wantsNoArgs = Symbol("wantsNoArgs");
 const wants2To3Args = Symbol("wants2To3Args");
-
-const errSchema = new Schemas();
-errSchema.addDescription(wants2Args, getDesc => (t1, t2) => `the description with ${getDesc(t1)} and ${getDesc(t2)}`);
-errSchema.addDescription(justAString, "Just a string");
-errSchema.addDescription(wantsNoArgs, _ => () => "wanted no args");
-errSchema.addDescription(wants2To3Args, getDesc => (t1, t2, t3 = AnyTy) => `${getDesc(t1)} and ${getDesc(t2)} and ${getDesc(t3)}`, { maxArgs: 3 });
 const resSchema = JsonSchema.arraySchema([Map, Number, Boolean], t => t);
-errSchema.addSchema(wants2Args, (_t1, _t2) => resSchema);
-errSchema.addSchema(wantsNoArgs, () => JsonSchema.booleanSchema(x => x));
-errSchema.addSchema(wants2To3Args, (_t1, _t2, _t3 = AnyTy) => JsonSchema.booleanSchema(x => x), { maxArgs: 3 });
+
+const errSchema = new Schemas()
+    .addSpec(wants2Args, {
+        description: getDesc => (t1, t2) => `the description with ${getDesc(t1)} and ${getDesc(t2)}`,
+        load: (_t1, _t2) => resSchema
+    })
+    .addSpec(justAString, {
+        description: "Just a string",
+    })
+    .addSpec(wantsNoArgs, {
+        description: _ => () => "wanted no args",
+        load: () => JsonSchema.booleanSchema(x => x)
+    })
+    .addSpec(wants2To3Args, {
+        maxArgs: 3,
+        description: getDesc => (t1, t2, t3 = AnyTy) => `${getDesc(t1)} and ${getDesc(t2)} and ${getDesc(t3)}`,
+        load: (_t1, _t2, _t3 = AnyTy) => JsonSchema.booleanSchema(x => x)
+    })
 
 function testWrongNumberOfSpecArguments(desc: string, f: () => any, spec: TySpec, numActual: number, expected: string): Test {
     return new Test(desc, () => {
