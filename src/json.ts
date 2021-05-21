@@ -136,9 +136,9 @@ type JsonNumber = GenJsonValue<"number">;
 
 type JsonString = GenJsonValue<"string">;
 
-function toJsonValue(x: any): Either<string, JsonValue> {
+function toJsonValue(x: any): Either<Error, JsonValue> {
     const pure = Either.pure;
-    const fail = Either.fail;
+    const fail = (msg: string) => Either.fail<Error, JsonValue>(new Error(msg));
     if (typeof x === 'string') {
         return pure(GenJsonValue.jsonString(x));
     } else if (typeof x === 'boolean') {
@@ -173,7 +173,7 @@ function toJsonValue(x: any): Either<string, JsonValue> {
     return fail(`could not load JSON value: ${x}`);
 }
 
-function parse(text: string): Either<string, JsonValue> {
+function parse(text: string): Either<Error, JsonValue> {
     return toJsonValue(JSON.parse(text));
 }
 
@@ -371,7 +371,7 @@ export class JsonParser {
     }
 
     /** Parse the JSON text as a member of the given type. */
-    parseAs(text: string, cls: TySpec): any {
+    parseAs(text: string, cls: TySpec): Either<Error, any> {
         return this.withSetupCleanUp(() => {
             return parse(text).mapCollecting(v => this.loadAs(v, cls));
         });
