@@ -1,6 +1,26 @@
 #+TITLE: DSPV - Data-serialisation Processing and Validation
 
-Deno module for working with JSON and TypeScript.
+DSPV stands for "Data-serialisation, Processing, and
+Validation". DSPV is a module for working with
+data-serialisation formats such as JSON in JavaScript, and
+making it easy to validate and process data straight into
+objects. DSPV uses TypeScript to ensure that the core is built
+faithfully, and it is recommended that DSPV be used with
+TypeScript for best results.
+
+DSPV is currently focused on JSON, but the addition of other
+formats such as YAML is on the radar for future.
+
+* Why use this module?
+
+This module has various benefits, including:
+
+- ability to smartly parse JSON directly into values based on
+  type-like specifications
+- ability to override how basic types (e.g., booleans,
+  numbers) are parsed
+- support for arbitrarily complex schemas that specify how to
+  read JSON into non-standard data structures
 
 * Builtin Specifiers
 
