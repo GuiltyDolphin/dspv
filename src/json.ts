@@ -462,7 +462,7 @@ function allSchemasSame<T>(f: JsonValueLoader<keyof JsonType, T>): JParser<T> {
     };
 }
 
-function isConstructor<T>(c: any): c is Constructor {
+function isConstructor(c: any): c is Constructor {
     try {
         Reflect.construct(Object, [], c);
         return true;
