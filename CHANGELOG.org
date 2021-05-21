@@ -13,8 +13,8 @@
     tests that passed
   - =test_verbose= for running tests with verbose output
     (i.e., includes tests that passed)
-- =parseAs= function for specifying which type to parse JSON
-  text into
+- =parseAs= function for specifying which specification to
+  parse JSON text into
 - specifiers
   - =anyOf=
   - =AnyTy=
