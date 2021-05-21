@@ -136,45 +136,39 @@ type JsonNumber = GenJsonValue<"number">;
 
 type JsonString = GenJsonValue<"string">;
 
-function toJsonValue(x: any): Either<Error, JsonValue> {
-    const pure = Either.pure;
-    const fail = (msg: string) => Either.fail<Error, JsonValue>(new Error(msg));
+function toJsonValue(x: JsonValueRaw): JsonValue {
     if (typeof x === 'string') {
-        return pure(GenJsonValue.jsonString(x));
+        return GenJsonValue.jsonString(x);
     } else if (typeof x === 'boolean') {
-        return pure(GenJsonValue.jsonBoolean(x));
+        return GenJsonValue.jsonBoolean(x);
     } else if (typeof x === 'number') {
-        return pure(GenJsonValue.jsonNumber(x));
+        return GenJsonValue.jsonNumber(x);
     } else if (x === null) {
-        return pure(GenJsonValue.jsonNull());
+        return GenJsonValue.jsonNull();
     } else if (x instanceof Array) {
-        const res = [];
-        for (let i = 0; i < x.length; i++) {
-            const ijson = toJsonValue(x[i]);
-            if (ijson.isLeft()) {
-                return ijson.propLeft();
-            }
-            res[i] = ijson.unwrapRight();
-        }
-        return pure(GenJsonValue.jsonArray(res));
-    } else if (typeof x === 'function') {
-        return fail('functions not supported by JSON');
-    } else if (typeof x === 'object') {
+        return GenJsonValue.jsonArray(x.map(v => toJsonValue(v)));
+    } else {
         const res: { [k: string]: JsonValue } = {};
         for (const k in x) {
-            const kjson = toJsonValue(x[k]);
-            if (kjson.isLeft()) {
-                return kjson.propLeft();
-            }
-            res[k] = kjson.unwrapRight();
+            res[k] = toJsonValue(x[k]);
         }
-        return pure(GenJsonValue.jsonObject(res));
+        return GenJsonValue.jsonObject(res);
     }
-    return fail(`could not load JSON value: ${x}`);
 }
 
-function parse(text: string): Either<Error, JsonValue> {
-    return toJsonValue(JSON.parse(text));
+function parseJSON(text: string): Either<SyntaxError, JsonValueRaw> {
+    try {
+        return Either.right(JSON.parse(text));
+    } catch (e) {
+        if (e instanceof SyntaxError) {
+            return Either.left(e);
+        }
+        throw e;
+    }
+}
+
+function parse(text: string): Either<SyntaxError, JsonValue> {
+    return parseJSON(text).map(toJsonValue);
 }
 
 class ParseContext {
@@ -403,7 +397,7 @@ export class JsonParser {
     }
 
     /** Parse the JSON text as a member of the given type. */
-    parseAs(text: string, cls: TySpec): Either<Error, any> {
+    parseAs(text: string, cls: TySpec): Either<SyntaxError | JsonParseError, any> {
         return this.withSetupCleanUp(() => {
             return parse(text).mapCollecting(v => this.loadAs(v, cls));
         });
