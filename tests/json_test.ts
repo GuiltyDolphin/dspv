@@ -71,12 +71,12 @@ class Basic2 {
 const basicSchema = JsonSchema.objectSchema<Basic>({
     'p': Boolean
 }, (o) => {
-    return new Basic(o.get('p'));
+    return new Basic(o.p);
 });
 
 const basic2Schema = JsonSchema.objectSchema<Basic2>({
     p: Basic,
-}, (o) => { return new Basic2(o.get('p')); });
+}, (o) => { return new Basic2(o.p); });
 
 class MyArray<T> {
     arr: T[];

@@ -529,7 +529,7 @@ export class JsonSchema<T> {
                 for (const ksk in ks) {
                     missedKeys.add(ksk);
                 }
-                const res = new Map<string, any>();
+                const res: { [k: string]: any } = {};
                 const obj = json.unwrap();
                 for (const k in obj) {
                     unreadKeys.add(k);
@@ -541,7 +541,7 @@ export class JsonSchema<T> {
                             if (v.isLeft()) {
                                 return v.propLeft();
                             }
-                            res.set(k, v.unwrapRight());
+                            res[k] = v.unwrapRight();
                         }
                     }
                 }
