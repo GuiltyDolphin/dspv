@@ -343,6 +343,24 @@ function assertParseFailsWithUnknownSpec(description: string, parser: JsonParser
 
 class Empty { }
 
+class Person {
+    age: number;
+    address: string;
+
+    constructor(age: number, address: string) {
+        this.age = age;
+        this.address = address;
+    }
+}
+
+const personParser = new JsonParser(Schemas.emptySchemas().addSpec(Person, {
+    description: "A person with an age and address",
+    load: JsonSchema.objectSchema<Person>({
+        age: Number,
+        address: String
+    }, (o) => new Person(o.age, o.address))
+}));
+
 testGroup("errors",
     testGroup("type error",
         assertParseFailsWithTypeError("expected boolean but got number, correct error", basicParser, '1', Boolean, Boolean, 'number', 1),
@@ -367,6 +385,24 @@ In key: "p"
 When trying to read a value for specification: number
 I saw: true
 But this is a boolean
+`, true),
+        testParseAsOrThrowFailsWithParser(
+            personParser, "correct string for objectSchema inside key (bad age)", '{"age": "not a number", "address": "somewhere on Earth"}', Person, JsonParser.JsonTypeError, `
+When trying to read a value for specification: A person with an age and address
+I saw: {"age":"not a number","address":"somewhere on Earth"}
+In key: "age"
+When trying to read a value for specification: number
+I saw: "not a number"
+But this is a string
+`, true),
+        testParseAsOrThrowFailsWithParser(
+            personParser, "correct string for objectSchema inside key (bad address)", '{"age": 20, "address": 7}', Person, JsonParser.JsonTypeError, `
+When trying to read a value for specification: A person with an age and address
+I saw: {"age":20,"address":7}
+In key: "address"
+When trying to read a value for specification: string
+I saw: 7
+But this is a number
 `, true),
         testGroup("correct determiner",
             testParseAsOrThrowFails("for array", '[]', [Object, Number], JsonParser.JsonTypeError, `

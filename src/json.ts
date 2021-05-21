@@ -537,7 +537,7 @@ export class JsonSchema<T> {
                         if (ksk == k) {
                             unreadKeys.delete(k);
                             missedKeys.delete(ksk);
-                            const v = parser.loadAs(obj[k], ks[ksk]);
+                            const v = parser.loadKeyAs(k, obj[k], ks[ksk]);
                             if (v.isLeft()) {
                                 return v.propLeft();
                             }
