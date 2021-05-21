@@ -213,6 +213,10 @@ class ParseContext {
         return new ParseContext.KeyEntered(parent, key);
     }
 
+    static atIndex(parent: ParseContext, index: number): ParseContext {
+        return new ParseContext.AtIndex(parent, index);
+    }
+
     private static ReadingValueForSpec = class extends ParseContext {
         private schemas: Schemas;
         private spec: TySpec;
@@ -227,6 +231,19 @@ class ParseContext {
 
         renderThis(): string {
             return `When trying to read a value for specification: ${this.schemas.getDescription(this.spec)}\nI saw: ${this.value.toJsonString()}`;
+        }
+    }
+
+    private static AtIndex = class extends ParseContext {
+        private index: number;
+
+        constructor(parent: ParseContext, index: number) {
+            super(parent);
+            this.index = index;
+        }
+
+        renderThis(): string {
+            return `At index: ${this.index}`;
         }
     }
 
@@ -282,6 +299,10 @@ export class JsonParser {
         this.updateContext(c => ParseContext.keyEntered(c, k));
     }
 
+    private contextAtIndex(i: number) {
+        this.updateContext(c => ParseContext.atIndex(c, i));
+    }
+
     _getDescriptionForSpec(spec: TySpec): string {
         return this.schemas.getDescription(spec);
     }
@@ -296,6 +317,17 @@ export class JsonParser {
      */
     loadKeyAs(k: string, jv: JsonValue, spec: TySpec): JsonParseResult<any> {
         this.contextEnterKey(k);
+        const res = this.loadAs(jv, spec);
+        this.contextPop();
+        return res;
+    }
+
+    /**
+     * Parse the JSON text as a member of the given type. Intended to
+     * be used when parsing a value at the given index of an array.
+     */
+    loadIndexAs(i: number, jv: JsonValue, spec: TySpec): JsonParseResult<any> {
+        this.contextAtIndex(i);
         const res = this.loadAs(jv, spec);
         this.contextPop();
         return res;
@@ -448,7 +480,7 @@ export class JsonSchema<T> {
             const res = new Array<any>();
             const arr = json.unwrap();
             for (let i = 0; i < arr.length; i++) {
-                const v = parser.loadAs(arr[i], eltSpec);
+                const v = parser.loadIndexAs(i, arr[i], eltSpec);
                 if (v.isLeft()) {
                     return v.propLeft();
                 }

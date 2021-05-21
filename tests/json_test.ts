@@ -404,6 +404,15 @@ When trying to read a value for specification: string
 I saw: 7
 But this is a number
 `, true),
+        testParseAsOrThrowFails("errors for arrays include index of failure",
+            '[0, 1, 2, true, 4]', [Array, Number], JsonParser.JsonTypeError, `
+When trying to read a value for specification: Array of number
+I saw: [0,1,2,true,4]
+At index: 3
+When trying to read a value for specification: number
+I saw: true
+But this is a boolean
+`, true),
         testGroup("correct determiner",
             testParseAsOrThrowFails("for array", '[]', [Object, Number], JsonParser.JsonTypeError, `
 When trying to read a value for specification: Object whose values are number

@@ -5,6 +5,11 @@
 
 * Unreleased
 
+** Added
+
+- errors encountered when processing arrays now specify the
+  failure index
+
 * 0.1.0 - 2021-05-21
 
 This release adds initial support for defining specifications
