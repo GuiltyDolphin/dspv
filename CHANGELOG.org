@@ -32,6 +32,7 @@
 
 - =make test= recipe now only outputs information for failing
   tests
+- renamed to =DSPV=
 
 * 0.0.0 - 2021-05-09
 

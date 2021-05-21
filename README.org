@@ -1,4 +1,4 @@
-#+TITLE: deno-json-ts
+#+TITLE: DSPV - Data-serialisation Processing and Validation
 
 Deno module for working with JSON and TypeScript.
 
