@@ -22,6 +22,140 @@ This module has various benefits, including:
 - support for arbitrarily complex schemas that specify how to
   read JSON into non-standard data structures
 
+* Usage
+
+Schemas map specification names to specifiers that determine
+how to process data. The default schema provides support for a
+host of standard types of data (see [[Builtin Specifiers]]).
+
+You can add new specifications to a schema by using the
+=addSchema= method, as in the following example:
+
+#+BEGIN_SRC typescript
+  class Person {
+      age: number;
+      address: string;
+
+      constructor(age: number, address: string) {
+          this.age = age;
+          this.address = address;
+      }
+  }
+
+  const schemas = Schemas.emptySchemas();
+
+  schemas.addSpec(Person, {
+      description: "A person with an age and an address",
+      load: JsonSchema.objectSchema({
+          age: Number,
+          address: String
+      })
+  });
+#+END_SRC
+
+This adds a specification that can be referenced as =Person=,
+which tries to read (=load=) an object with an age field (a
+number), and an address field (a string). We can test this out
+by creating a parser and running as follows:
+
+#+BEGIN_SRC typescript
+  const parser = new JsonParser(schemas);
+
+  console.log(parser.parseAsOrThrow('{"age": 20, "address": "somewhere on Earth"}'));
+  // Person { age: 20, address: "somewhere on Earth" }
+#+END_SRC
+
+If we try to give an incorrect age (e.g., a string), or
+address (e.g., a number,) or gave different fields, we'd be
+presented with a useful error message that incorporates the
+=description=:
+
+#+BEGIN_SRC typescript
+  function tryItOut(text: string) {
+      // 'parseAs' returns an Either value, so we can grab the error message here
+      console.log(parser.parseAs(text, Person).either(err => err.message, _ => ""));
+  }
+
+  // wrong type for age
+  tryItOut('{"age": "not a number", "address": "somewhere on Earth"}');
+  // When trying to read a value for specification: A person with an age and an address
+  // I saw: {"age":"not a number","address":"somewhere on Earth"}
+  // In key: "age"
+  // When trying to read a value for specification: number
+  // I saw: "not a number"
+  // But this is a string
+
+  // wrong type for address
+  tryItOut('{"age": 20, "address": 7}');
+  // When trying to read a value for specification: A person with an age and an address
+  // I saw: {"age":20,"address":7}
+  // In key: "address"
+  // When trying to read a value for specification: string
+  // I saw: 7
+  // But this is a number
+
+  // missing a key
+  tryItOut('{"address": "somewhere on Earth"}');
+  // When trying to read a value for specification: A person with an age and an address
+  // I saw: {"address":"somewhere on Earth"}
+  // But the following keys are required and were not specified: "age"
+
+  // extra key
+  tryItOut('{"age": 20, "address": "somewhere on Earth", "other key": 1}');
+  // When trying to read a value for specification: A person with an age and an address
+  // I saw: {"age":20,"address":"somewhere on Earth","other key":1}
+  // But I saw the following keys which are not accepted by the specification: "other key"
+#+END_SRC
+
+** Specifiers with arguments
+
+Specifiers can take arguments, a common example of this is
+=Array= which takes a single spec as an argument which
+determines what kinds of things can be in the array. For
+example, if you wanted to parse an array of booleans, you
+could do:
+
+#+BEGIN_SRC typescript
+  new JsonParser().parseAsOrThrow("[true, false]", [Array, Boolean]);
+  // [ true, false ]
+#+END_SRC
+
+You can define your own specifiers that takes arguments by
+defining =description= and =load= to be functions. Note that
+if either of these functions takes optional arguments, you
+should specify the =maxArgs= option, which helps provide nicer
+messages when an incorrect call is made.
+
+#+BEGIN_SRC typescript
+  const myCustomArray = Symbol('myCustomArray');
+
+  const parser = new JsonParser(Schemas.emptySchema().addSpec(myCustomArray, {
+      maxArgs: 2,
+      description: (getDesc) => (t1, t2 = Boolean) => `Array of ${getDesc(t1)} and ${getDesc(t2)}`,
+      load: (t1, t2 = Boolean) => JsonSchema.arraySchema([anyOf, t1, t2], a => a)
+  }));
+
+  parser.parseAsOrThrow("[true, 1, false]", [myCustomArray, Number]);
+  // [ true, 1, false ]
+
+  parser.parseAsOrThrow('["bad"]', [myCustomArray, Number]);
+  // When trying to read a value for specification: Array of Number and Boolean
+  // I saw: ["bad"]
+  // When trying to read a value for specification: [Symbol(anyOf), number, boolean]
+  // I saw: "bad"
+  // But this is a string
+
+  parser.parseAsOrThrow('["ok", 7]', [myCustomArray, Number, String]);
+  // [ "ok", 7 ]
+
+  parser.parseAsOrThrow("[true, 1, false]", [myCustomArray, Number, String]);
+  // When trying to read a value for specification: Array of Number and String
+  // I saw: [true,1,false]
+  // When trying to read a value for specification: [Symbol(anyOf), number, string]
+  // I saw: true
+  // But this is a boolean
+#+END_SRC
+
 * Builtin Specifiers
 
 The following specifiers are supported out-of-the-box:
