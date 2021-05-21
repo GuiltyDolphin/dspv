@@ -18,6 +18,14 @@ and reading JSON.
     (i.e., includes tests that passed)
 - =parseAs= function for specifying which specification to
   parse JSON text into
+- README sections
+  - "Why use this module?"
+  - "Usage"
+    - "Specifiers with arguments"
+  - "Builtin Specifiers"
+  - "Development"
+    - "Coverage"
+    - "Testing"
 - specifiers
   - =anyOf=
   - =AnyTy=
