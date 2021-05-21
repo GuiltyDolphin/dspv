@@ -446,16 +446,18 @@ export namespace JsonParser {
 
 type StringKeyed<T> = { [k: string]: T };
 
+type JsonValueLoader<K extends keyof JsonType, T> = TySpec | ((parser: JsonParser, json: GenJsonValue<K>) => JsonParseResult<T>);
+
 type JParser<T> = {
-    onArray: (parser: JsonParser, json: JsonArray) => JsonParseResult<T>,
-    onBoolean: (parser: JsonParser, json: JsonBoolean) => JsonParseResult<T>,
-    onNull: (parser: JsonParser, json: JsonNull) => JsonParseResult<T>,
-    onNumber: (parser: JsonParser, json: JsonNumber) => JsonParseResult<T>,
-    onObject: (parser: JsonParser, json: JsonObject) => JsonParseResult<T>
-    onString: (parser: JsonParser, json: JsonString) => JsonParseResult<T>
+    onArray: JsonValueLoader<'array', T>,
+    onBoolean: JsonValueLoader<'boolean', T>,
+    onNull: JsonValueLoader<'null', T>,
+    onNumber: JsonValueLoader<'number', T>,
+    onObject: JsonValueLoader<'object', T>,
+    onString: JsonValueLoader<'string', T>
 };
 
-function allSchemasSame<T>(f: (parser: JsonParser, value: JsonValue) => JsonParseResult<T>): JParser<T> {
+function allSchemasSame<T>(f: JsonValueLoader<keyof JsonType, T>): JParser<T> {
     return {
         onArray: f,
         onBoolean: f,
@@ -466,7 +468,28 @@ function allSchemasSame<T>(f: (parser: JsonParser, value: JsonValue) => JsonPars
     };
 }
 
-/** Schema that specifies how to load a specific class from JSON. */
+function isConstructor<T>(c: any): c is Constructor {
+    try {
+        Reflect.construct(Object, [], c);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+/**
+ * Schema that specifies how to load from JSON.
+ *
+ * The constructor takes a single argument which specifies how to
+ * parse each JSON value. The argument can specify the following keys:
+ * 'onArray', 'onBoolean', 'onNull', 'onNumber', 'onObject', and
+ * 'onString'. The value at each key may either be a specifier (e.g.,
+ * "Boolean" or "[Array, Number]"), in which case the specifier is
+ * used to load the value; or it may be a function which takes the
+ * active parser, and the JSON value of the respective type, and
+ * produces a {@link JsonParseResult}.
+ *
+ */
 export class JsonSchema<T> {
     private objectParser: JParser<T>;
 
@@ -606,19 +629,28 @@ export class JsonSchema<T> {
         return new JsonSchema(specs);
     }
 
+    /**
+     * If the provided argument is a specification, then try and load
+     * the value using it. Otherwise, the argument is a function that
+     * can process the value, so run it with the given value.
+     */
+    private static orSpec<K extends keyof JsonType, T>(s: TySpec | ((parser: JsonParser, val: GenJsonValue<K>) => JsonParseResult<T>), parser: JsonParser, o: GenJsonValue<K>): JsonParseResult<T> {
+        return (typeof s === 'function' && !isConstructor(s)) ? s(parser, o) : parser.loadAs(o, s);
+    }
+
     on(parser: JsonParser, o: JsonValue): JsonParseResult<T> {
         if (o.isArray()) {
-            return this.objectParser.onArray(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onArray, parser, o);
         } else if (o.isBoolean()) {
-            return this.objectParser.onBoolean(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onBoolean, parser, o);
         } else if (o.isNull()) {
-            return this.objectParser.onNull(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onNull, parser, o);
         } else if (o.isNumber()) {
-            return this.objectParser.onNumber(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onNumber, parser, o);
         } else if (o.isObject()) {
-            return this.objectParser.onObject(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onObject, parser, o);
         } else if (o.isString()) {
-            return this.objectParser.onString(parser, o);
+            return JsonSchema.orSpec(this.objectParser.onString, parser, o);
         }
         throw new Error("fatal: unknown class representing a JSON value: " + String(o.constructor));
     }

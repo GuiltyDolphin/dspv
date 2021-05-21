@@ -9,6 +9,7 @@
 
 - errors encountered when processing arrays now specify the
   failure index
+- =JParser= values can now be specifiers
 
 * 0.1.0 - 2021-05-21
 

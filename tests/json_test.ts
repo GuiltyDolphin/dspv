@@ -131,6 +131,31 @@ const parserWithExtra = new JsonParser(extraSchemas);
 
 const anyOfMixElems: TySpec = [anyOf, alwaysEmptyArray, negatedBoolean, nullBecomes5, alwaysZero, alwaysEmptyObject, alwaysEmptyString];
 
+const numGreaterThan0 = Symbol();
+const numGreaterThan0OrArrayOf = Symbol();
+
+const numGT0OrArrayParser = new JsonParser(Schemas.emptySchemas()
+    .addSpec(numGreaterThan0, {
+        description: 'a number greater than zero',
+        load: JsonSchema.customSchema<number>({
+            onNumber: (parser, json) => {
+                const n = json.unwrap();
+                if (n > 0) {
+                    return JsonParser.parseOk(n);
+                }
+                return parser.failWithTypeError('number not greater than zero');
+            }
+        })
+    })
+    .addSpec(numGreaterThan0OrArrayOf, {
+        description: 'a number greater than zero or an array of these',
+        load: JsonSchema.customSchema<number | number[]>({
+            onNumber: numGreaterThan0,
+            onArray: [Array, numGreaterThan0]
+        })
+    })
+);
+
 testGroup("parseAsOrThrow",
     testGroup("standard JSON types",
         testGroup("array",
@@ -289,6 +314,13 @@ testGroup("parseAsOrThrow",
             assertParseFailsWithTypeError("inner element is not of the correct type", customArrayParser, '[1]', [customArray, Boolean], Boolean, 'number', 1),
             testParseAsOrThrowWithParser(customArrayParser, "okay with array of boolean", "[true, false, true]", [customArray, Boolean], new MyArray([true, false, true])),
             testParseAsOrThrowWithParser(customArrayParser, "okay with array of Basic", '[{"p": true}, {"p": false}]', [customArray, Basic], new MyArray([new Basic(true), new Basic(false)])),
+        ),
+
+        testGroup("referencing specifications, number greater than zero or array of this",
+            testParseAsOrThrowWithParser(numGT0OrArrayParser, "array of number >0", '[1, 2, 3]', numGreaterThan0OrArrayOf, [1, 2, 3]),
+            testParseAsOrThrowWithParser(numGT0OrArrayParser, "number >0", '1', numGreaterThan0OrArrayOf, 1),
+            assertParseFailsWithTypeError("number =0", numGT0OrArrayParser, '0', numGreaterThan0OrArrayOf, numGreaterThan0, 'number not greater than zero', 0),
+            assertParseFailsWithTypeError("array with number =0", numGT0OrArrayParser, '[0]', numGreaterThan0OrArrayOf, numGreaterThan0, 'number not greater than zero', 0),
         ),
     ),
 ).runAsMain();
