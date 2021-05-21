@@ -416,26 +416,28 @@ export class JsonParser {
     static parseOk<T>(x: T): JsonParseResult<T> {
         return Either.pure(x);
     }
+}
 
-    static JsonTypeError = class extends JsonParseError {
+export namespace JsonParser {
+    export class JsonTypeError extends JsonParseError {
         constructor(context: ParseContext, actualTyDesc: string) {
             super(context, `But this is ${determinerFor(actualTyDesc)} ${actualTyDesc}`);
         }
     }
 
-    static MissingKeysError = class extends JsonParseError {
+    export class MissingKeysError extends JsonParseError {
         constructor(context: ParseContext, keys: string[]) {
             super(context, `But the following keys are required and were not specified: ${keys.map(k => JSON.stringify(k)).join(', ')}`);
         }
     }
 
-    static UnknownKeysError = class extends JsonParseError {
+    export class UnknownKeysError extends JsonParseError {
         constructor(context: ParseContext, keys: string[]) {
             super(context, `But I saw the following keys which are not accepted by the specification: ${keys.map(k => JSON.stringify(k)).join(', ')}`);
         }
     }
 
-    static UnknownSpecError = class extends JsonParseError {
+    export class UnknownSpecError extends JsonParseError {
         constructor(context: ParseContext, spec: TySpec) {
             super(context, `But I don't know how to parse a value for the specification: ${tySpecDescription(spec)}`);
         }
