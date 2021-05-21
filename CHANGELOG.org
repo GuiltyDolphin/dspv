@@ -5,6 +5,9 @@
 
 * Unreleased
 
+This release adds initial support for defining specifications
+and reading JSON.
+
 ** Added
 
 - make recipes
