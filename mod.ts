@@ -1,6 +1,7 @@
 export {
     anyOf,
     AnyTy,
+    Enum,
     JsonParseError,
     JsonParser,
     JsonSchema,

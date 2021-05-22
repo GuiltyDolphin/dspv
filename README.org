@@ -167,6 +167,7 @@ The following specifiers are supported out-of-the-box:
   type of value. If =T= is provided as an argument, it matches
   an array of the given type instead
 - =Boolean= matches a boolean
+- =Enum (...Lits)= matches any literal value from =Lits=
 - =Map (T?)= matches an object whose values match =T=, and
   returns this as a =Map= from =String= keys to values
   produced by =T=. If =T= is not provided, it defaults to

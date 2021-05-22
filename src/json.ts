@@ -4,8 +4,8 @@ import {
     flattenNonEmpty,
     groupingStartAndEnd,
     NestMap,
-    NonEmpty,
-    NonEmptyNested,
+    NonEmptyFirstCanDiffer,
+    NonEmptyNestedFirstCanDiffer,
 } from './util.ts';
 
 type GenJsonType<T> = {
@@ -657,18 +657,18 @@ interface Constructor {
 /** Represents values that can take any type. */
 export const AnyTy = Symbol("AnyTy");
 
-type SchemaBuilder = (...args: TySpec[]) => JsonSchema<any>;
+type SchemaBuilder = SFun<JsonSchema<any>>;
 
-type DescriptionFn = (...args: TySpec[]) => string;
+type DescriptionFn = SFun<string>;
 
-function tySpecAsGroupedBase(x: TySpec): NonEmptyNested<TySpecBase> {
+function tySpecAsGroupedBase(x: TySpec): NonEmptyNestedFirstCanDiffer<TySpecBase, TySpecArgBase> {
     if (x instanceof Array) {
         return x;
     }
     return [x];
 }
 
-function flattenTySpec(x: TySpec): NonEmpty<TySpecBase> {
+function flattenTySpec(x: TySpec): NonEmptyFirstCanDiffer<TySpecBase, TySpecArgBase> {
     return flattenNonEmpty(tySpecAsGroupedBase(x));
 }
 
@@ -686,32 +686,77 @@ function argChecker(spec: TySpec, f: (...args: any[]) => any, maxArgs: undefined
     };
 }
 
-class Spec<T> {
-    private description: Maybe<DescriptionFn>;
-    private builder: Maybe<(...args: TySpec[]) => JsonSchema<T>>;
+class Spec<K extends 'specs' | 'mixed', T> {
+    private accepts: K;
+    private description: Maybe<DescriptionFn[K]>;
+    private builder: Maybe<SFun<JsonSchema<T>>[K]>;
 
     constructor(opts: {
-        description?: DescriptionFn,
-        build?: (...args: TySpec[]) => JsonSchema<T>
+        accepts: K
+        description?: DescriptionFn[K],
+        build?: SFun<JsonSchema<T>>[K]
     }) {
+        this.accepts = opts.accepts;
         this.description = opts.description === undefined ? Maybe.none() : Maybe.some(opts.description);
         this.builder = opts.build === undefined ? Maybe.none() : Maybe.some(opts.build);
     }
 
-    getBuilder(): Maybe<(...args: TySpec[]) => JsonSchema<T>> {
-        return this.builder;
+    getBuilder(): Maybe<[K, SFun<JsonSchema<T>>[K]]> {
+        return this.builder.map(b => [this.accepts, b]);
     }
 
-    getDescriptionFn(): Maybe<DescriptionFn> {
-        return this.description;
+    getDescriptionFn(): Maybe<[K, DescriptionFn[K]]> {
+        return this.description.map(d => [this.accepts, d]);
     }
 }
 
 export class Schemas {
-    private specs: NestMap<TySpecBase, Spec<any>>;
+    private specs: NestMap<TySpecArgBase, Spec<keyof SFun<any>, any>>;
 
     constructor() {
         this.specs = new NestMap();
+    }
+
+    private _addSpec<K extends 'specs' | 'mixed', T>(spec: TySpec, opts: {
+        accepts: K
+        description?: string | ((f: (t: TySpecArg) => string) => DescriptionFn[K]),
+        maxArgs?: number
+        load?: JsonSchema<T> | SchemaBuilder[K]
+    }): Schemas {
+        const accepts = opts.accepts;
+        const description = opts.description;
+        const s = flattenTySpec(spec);
+
+        let descFn: undefined | DescriptionFn[K] = undefined;
+        if (typeof description === 'string') {
+            descFn = (..._: TySpecArg[]) => description;
+        } else if (description !== undefined) {
+            const innerDesc = description(t => this.getDescription(t));
+            const checkArgs = argChecker(s, innerDesc, opts.maxArgs);
+            descFn = (...args: TySpecArg[]) => {
+                checkArgs(args);
+                return (innerDesc instanceof Array ? innerDesc[1] : innerDesc)(...args);
+            };
+        }
+
+        let builder: undefined | SchemaBuilder[K] = undefined;
+        const load = opts.load;
+        if (load instanceof JsonSchema) {
+            builder = () => load;
+        } else if (load !== undefined) {
+            const checkArgs = argChecker(s, load, opts.maxArgs);
+            builder = (...args: TySpecArg[]) => {
+                checkArgs(args);
+                return (load instanceof Array ? load[1] : load)(...args);
+            };
+        }
+
+        this.specs.set(s, new Spec({
+            accepts: accepts,
+            description: descFn,
+            build: builder
+        }));
+        return this;
     }
 
     /**
@@ -730,55 +775,46 @@ export class Schemas {
      * rest argument exists.
      */
     addSpec<T>(spec: TySpec, opts: {
-        description?: string | ((f: (t: TySpec) => string) => (...args: TySpec[]) => string),
+        description?: string | ((f: (t: TySpecArg) => string) => DescriptionFn['specs']),
         maxArgs?: number
-        load?: JsonSchema<T> | ((...args: TySpec[]) => JsonSchema<T>)
+        load?: JsonSchema<T> | SchemaBuilder['specs']
     }): Schemas {
-        const description = opts.description;
-        const s = flattenTySpec(spec);
-
-        let descFn: undefined | ((...args: TySpec[]) => string) = undefined;
-        if (typeof description === 'string') {
-            descFn = (..._) => description;
-        } else if (description !== undefined) {
-            const innerDesc = description(t => this.getDescription(t));
-            const checkArgs = argChecker(s, innerDesc, opts.maxArgs);
-            descFn = (...args) => {
-                checkArgs(args);
-                return innerDesc(...args);
-            };
-        }
-
-        let builder: undefined | ((...args: TySpec[]) => JsonSchema<any>) = undefined;
-        const load = opts.load;
-        if (load instanceof JsonSchema) {
-            builder = () => load;
-        } else if (load !== undefined) {
-            const checkArgs = argChecker(s, load, opts.maxArgs);
-            builder = (...args) => {
-                checkArgs(args);
-                return load(...args);
-            };
-        }
-
-        this.specs.set(s, new Spec({
-            description: descFn,
-            build: builder
-        }));
-        return this;
+        return this._addSpec(spec, { accepts: 'specs', ...opts });
     }
 
-    private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, SchemaBuilder, TySpec[]]> {
+    /**
+     * Like {@link addSpec}, but arguments may be non-specifications.
+     */
+    addMixedSpec<T>(spec: TySpec, opts: {
+        description?: string | ((f: (t: TySpecArg) => string) => DescriptionFn['mixed']),
+        maxArgs?: number
+        load?: JsonSchema<T> | SchemaBuilder['mixed']
+    }): Schemas {
+        return this._addSpec(spec, { accepts: 'mixed', ...opts });
+    }
+
+    private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, [keyof SchemaBuilder, SchemaBuilder[keyof SchemaBuilder]], TySpec[]]> {
         return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getBuilder().map(b => [c[0], b, c[2]])));
     }
 
     /** Get the schema associated with the given specification, if any. */
     getSchemaForSpec(spec: TySpec): Maybe<JsonSchema<any>> {
         return this.mostSpecificSchema(spec)
-            .map(([_, f, args]: [TySpec, SchemaBuilder, TySpec[]]) => f(...args));
+            .map(([_, [ty, f], args]: [TySpec, [keyof SchemaBuilder, SchemaBuilder[keyof SchemaBuilder]], TySpecArg[]]) => {
+                if (ty === 'specs') {
+                    const tyArgs = args.map(t => {
+                        if (argIsSpec(t)) {
+                            return t
+                        }
+                        throw new Error('passed non-spec argument')
+                    })
+                    return (f as SchemaBuilder['specs'])(...tyArgs);
+                }
+                return (f as SchemaBuilder['mixed'])(...args);
+            });
     }
 
-    private mostSpecificSpec(spec: TySpec): Maybe<[TySpec, Spec<any>, TySpec[]]> {
+    private mostSpecificSpec(spec: TySpec): Maybe<[TySpec, Spec<keyof SFun<any>, any>, TySpec[]]> {
         return this.specs.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
             const [path, foundSpec, rest] = x;
             const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
@@ -786,11 +822,11 @@ export class Schemas {
         });
     }
 
-    private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, DescriptionFn, TySpec[]]> {
+    private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, [keyof DescriptionFn, DescriptionFn[keyof DescriptionFn]], TySpec[]]> {
         return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getDescriptionFn().map(d => [c[0], d, c[2]])));
     }
 
-    static _getDescriptionBase(spec: TySpec): string {
+    static _getDescriptionBase(spec: TySpecArg): string {
         if (spec instanceof Array) {
             if (spec.length == 1) {
                 return Schemas._getDescriptionBase(spec[0]);
@@ -801,23 +837,37 @@ export class Schemas {
         }
     }
 
-    getDescription(spec: TySpec): string {
+    getDescription(spec: TySpecArg): string {
+        if (!argIsSpec(spec)) {
+            return JSON.stringify(spec);
+        }
         return this.mostSpecificDescription(spec).maybef(() => {
             if (spec instanceof Array) {
                 return `[${spec.map(t => this.getDescription(t)).join(', ')}]`;
             } else {
                 return tySpecBaseDescription(spec);
             }
-        }, c => c[1](...c[2]));
+        }, ([_, [ty, f], args]: [TySpec, [keyof DescriptionFn, DescriptionFn[keyof DescriptionFn]], TySpecArg[]]) => {
+            if (ty === 'specs') {
+                const tyArgs = args.map(t => {
+                    if (argIsSpec(t)) {
+                        return t
+                    }
+                    throw new Error('passed non-spec argument')
+                })
+                return (f as DescriptionFn['specs'])(...tyArgs);
+            }
+            return (f as DescriptionFn['mixed'])(...args);
+        })
     }
 
-    protected getSpecMap(): NestMap<TySpecBase, Spec<any>> {
+    protected getSpecMap(): NestMap<TySpecArgBase, Spec<keyof SFun<any>, any>> {
         return this.specs;
     }
 
     /** Merge with another schema, favouring definitions in the parameter schema. */
     protected mergeWith(schemas: Schemas) {
-        this.specs = new NestMap<TySpecBase, Spec<any>>().mergeWith(this.getSpecMap()).mergeWith(schemas.getSpecMap());
+        this.specs = new NestMap<TySpecArgBase, Spec<keyof SFun<any>, any>>().mergeWith(this.getSpecMap()).mergeWith(schemas.getSpecMap());
     }
 
     static emptySchemas(): Schemas {
@@ -856,6 +906,8 @@ export const anyOf = Symbol("anyOf");
 /** [tuple, t1, ..., tn] matches an array of length n whose ith element matches ti. */
 export const tuple = Symbol("tuple");
 
+export const Enum = Symbol("Enum");
+
 function defaultSchema(): Schemas {
     return Schemas.emptySchemas()
         .addSpec(anyOf, {
@@ -882,6 +934,13 @@ function defaultSchema(): Schemas {
         .addSpec(Boolean, {
             description: 'boolean',
             load: JsonSchema.booleanSchema(x => x)
+        })
+        .addMixedSpec(Enum, {
+            description: (getDesc) => (...args) => `One of the following (Enum): ${args.map(getDesc).join(" OR ")}`,
+            load: (...args) => JsonSchema.customSchema(allSchemasSame((parser, value) => {
+                const v = value.unwrapFully();
+                return args.includes(v as any) ? JsonParser.parseOk(v) : parser.failWithTypeError('different value');
+            }))
         })
         .addSpec(Map, {
             maxArgs: 1,
@@ -933,11 +992,17 @@ function defaultSchema(): Schemas {
 
 /** Type-like specification for how to read from JSON. Includes constructors and additional types like 'null' and {@link AnyTy} */
 type TySpecBase = symbol | null | Constructor
-export type TySpec = TySpecBase | [TySpecBase, ...TySpec[]];
+type TySpecArgRaw = boolean | number | string;
+type TySpecArgBase = TySpecArgRaw | TySpecBase
+type TySpecArg = TySpecArgRaw | TySpec
+export type TySpec = TySpecBase | [TySpecBase, ...TySpecArg[]]
 
-function tySpecBaseDescription(t: TySpecBase): string {
+function tySpecBaseDescription(t: TySpecArgBase): string {
     if (typeof t === 'symbol') {
         return t.toString();
+    }
+    if (!argIsSpec(t)) {
+        return JSON.stringify(t);
     }
     if (t === null) {
         return 'null'
@@ -945,11 +1010,24 @@ function tySpecBaseDescription(t: TySpecBase): string {
     return t.name;
 }
 
+function tySpecArgDescription(t: TySpecArg): string {
+    if (t instanceof Array) {
+        return tySpecDescription(t);
+    }
+    return tySpecBaseDescription(t);
+}
+
 function tySpecDescription(t: TySpec): string {
     if (t instanceof Array) {
         const [head, ...rest] = t;
-        return `[${[tySpecBaseDescription(head), ...rest.map(tySpecDescription)].join(', ')}]`;
+        return `[${[tySpecBaseDescription(head), ...rest.map(tySpecArgDescription)].join(', ')}]`;
     } else {
         return tySpecBaseDescription(t);
     }
 }
+
+function argIsSpec(x: TySpecArg): x is TySpec {
+    return !(typeof x).match('^(string|number)$');
+}
+
+type SFun<T> = { 'specs': (...args: TySpec[]) => T, 'mixed': (...args: TySpecArg[]) => T }

@@ -15,21 +15,24 @@ export type Nested<T> = (T | Nested<T>)[]
 export type SafeNested<T extends NotArray<any>> = Nested<T>
 
 /** A non-empty list. */
-export type NonEmpty<T> = [T, ...T[]]
+export type NonEmptyFirstCanDiffer<F, T> = [F, ...T[]]
+export type NonEmpty<T> = NonEmptyFirstCanDiffer<T, T>
 
 function isNonEmptyArray<T>(x: T[]): x is NonEmpty<T> {
     return x.length > 0;
 }
 
 /** A non-empty list whose elements may themselves be nested, non-empty lists. */
-export type NonEmptyNested<T> = [T | NonEmptyNested<T>, ...(T | NonEmptyNested<T>)[]]
+export type NonEmptyNestedFirstCanDiffer<F, T> = [F | NonEmptyNestedFirstCanDiffer<F, T>, ...(T | NonEmptyNestedFirstCanDiffer<F, T>)[]]
+export type NonEmptyNested<T> = NonEmptyNestedFirstCanDiffer<T, T>
 
 /**
  * A non-empty list whose elements may themselves be nested, non-empty lists.
  *
  * The type of elements cannot itself be a list.
  */
-export type SafeNonEmptyNested<T extends NotArray<any>> = NonEmptyNested<T>
+export type SafeNonEmptyNestedFirstCanDiffer<F extends NotArray<any>, T extends NotArray<any>> = NonEmptyNestedFirstCanDiffer<F, T>
+export type SafeNonEmptyNested<T> = SafeNonEmptyNestedFirstCanDiffer<T, T>
 
 function _flatten<T>(arr: SafeNested<T>, result: T[]): void {
     for (let i = 0; i < arr.length; i++) {
@@ -46,8 +49,8 @@ export function flatten<T>(arr: SafeNested<T>): T[] {
 };
 
 /** Flatten a list of non-empty, nested lists into a single flat non-empty list. */
-export function flattenNonEmpty<T>(xs: SafeNonEmptyNested<T>): NonEmpty<T> {
-    return flatten(xs) as NonEmpty<T>;
+export function flattenNonEmpty<F, T>(xs: SafeNonEmptyNestedFirstCanDiffer<F, T>): NonEmptyFirstCanDiffer<F, T> {
+    return flatten(xs) as NonEmptyFirstCanDiffer<F, T>;
 }
 
 /** Essentially an AST for a list (without element values). */
