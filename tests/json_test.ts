@@ -103,10 +103,10 @@ myArraySchemas.addSpec(Basic, { load: basicSchema });
 const customArray = Symbol("customArray");
 const customArraySchemas = Schemas.emptySchemas();
 customArraySchemas.addSpec(customArray, {
+    maxArgs: 1,
     description: 'custom array',
-    load: (t: TySpec) => JsonSchema.arraySchema(t, r => new MyArray(r))
+    load: (t: TySpec = AnyTy) => JsonSchema.arraySchema(t, r => new MyArray(r))
 });
-customArraySchemas.addAlias(customArray, [customArray, AnyTy]);
 customArraySchemas.addSpec(Basic, { load: basicSchema });
 
 const alwaysEmptyArray = Symbol('alwaysEmptyArray');
@@ -225,11 +225,8 @@ testGroup("parseAsOrThrow",
         testGroup("Map",
             testParseAsOrThrow('empty map', '{}', Map, new Map()),
             testParseAsOrThrow('nonempty map', '{"k": 7}', Map, new Map([['k', 7]])),
-            testParseAsOrThrow('map with string keys', '{"k": true}', [Map, String], new Map([['k', true]])),
-            testParseAsOrThrow('map with boolean values', '{"k": true}', [Map, String, Boolean], new Map([['k', true]])),
-            testParseAsOrThrowFailsWithTypeError('map with boolean values, but with a number', '{"k": 1}', [Map, String, Boolean]),
-            testParseAsOrThrowFails('map with boolean keys', '{"k": 1}', [Map, Boolean], JsonParser.UnknownSpecError),
-            testParseAsOrThrowFails('map with boolean keys and boolean values', '{"k": 1}', [Map, Boolean, Boolean], JsonParser.UnknownSpecError),
+            testParseAsOrThrow('map with boolean values', '{"k": true}', [Map, Boolean], new Map([['k', true]])),
+            testParseAsOrThrowFailsWithTypeError('map with boolean values, but with a number', '{"k": 1}', [Map, Boolean]),
         ),
 
         testGroup("Set",

@@ -708,17 +708,10 @@ class Spec<T> {
 }
 
 export class Schemas {
-    private aliases: NestMap<TySpecBase, TySpec>;
     private specs: NestMap<TySpecBase, Spec<any>>;
 
     constructor() {
-        this.aliases = new NestMap();
         this.specs = new NestMap();
-    }
-
-    addAlias(spec: TySpec, alias: TySpec): Schemas {
-        this.aliases.set(flattenTySpec(spec), alias);
-        return this;
     }
 
     /**
@@ -775,11 +768,6 @@ export class Schemas {
         return this;
     }
 
-    protected resolveAlias(spec: TySpec): TySpec {
-        const alias = this.aliases.get(flattenTySpec(spec));
-        return alias.maybe(spec, alias => this.resolveAlias(alias));
-    }
-
     private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, SchemaBuilder, TySpec[]]> {
         return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getBuilder().map(b => [c[0], b, c[2]])));
     }
@@ -791,10 +779,9 @@ export class Schemas {
     }
 
     private mostSpecificSpec(spec: TySpec): Maybe<[TySpec, Spec<any>, TySpec[]]> {
-        const resolvedSpec = this.resolveAlias(spec);
-        return this.specs.getBestAndRestWithPath(flattenTySpec(resolvedSpec)).map(x => {
+        return this.specs.getBestAndRestWithPath(flattenTySpec(spec)).map(x => {
             const [path, foundSpec, rest] = x;
-            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(resolvedSpec), path, rest);
+            const [specMatch, args] = groupingStartAndEnd(tySpecAsGroupedBase(spec), path, rest);
             return [(specMatch.length > 1 ? specMatch : specMatch[0]) as TySpec, foundSpec, args as TySpec[]];
         });
     }
@@ -828,13 +815,8 @@ export class Schemas {
         return this.specs;
     }
 
-    protected getAliasMap(): NestMap<TySpecBase, TySpec> {
-        return this.aliases;
-    }
-
     /** Merge with another schema, favouring definitions in the parameter schema. */
     protected mergeWith(schemas: Schemas) {
-        this.aliases = new NestMap<TySpecBase, TySpec>().mergeWith(this.aliases).mergeWith(schemas.getAliasMap());
         this.specs = new NestMap<TySpecBase, Spec<any>>().mergeWith(this.getSpecMap()).mergeWith(schemas.getSpecMap());
     }
 
@@ -901,12 +883,11 @@ function defaultSchema(): Schemas {
             description: 'boolean',
             load: JsonSchema.booleanSchema(x => x)
         })
-        .addSpec([Map, String], {
+        .addSpec(Map, {
             maxArgs: 1,
             description: getDesc => (t = AnyTy) => "Map with string keys and values matching " + getDesc(t),
             load: (t = AnyTy) => JsonSchema.objectSchemaMap(_ => t, r => r)
         })
-        .addAlias(Map, [Map, String])
         .addSpec(null, {
             description: 'null',
             load: JsonSchema.nullSchema(x => x)

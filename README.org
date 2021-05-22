@@ -167,10 +167,10 @@ The following specifiers are supported out-of-the-box:
   type of value. If =T= is provided as an argument, it matches
   an array of the given type instead
 - =Boolean= matches a boolean
-- =Map (String, T2?)?= matches an object whose values match
-  =T2=, and returns this as a =Map= from =String= keys to
-  values produced by =T2=. If =T2= is not provided, it
-  defaults to =AnyTy=
+- =Map (T?)= matches an object whose values match =T=, and
+  returns this as a =Map= from =String= keys to values
+  produced by =T=. If =T= is not provided, it defaults to
+  =AnyTy=
 - =null= matches =null=
 - =Number= matches a number
 - =Object (T?)= matches an object whose values match =T= (or
