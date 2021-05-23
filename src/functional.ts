@@ -1,8 +1,31 @@
-interface Functor<T> {
-    map<T2>(f: (t: T) => T2): Functor<T2>;
+// see https://stackoverflow.com/a/55694876 for more on using
+// interfaces as type stores
+interface Generic1<T> { }
+
+type Generic1Key = keyof Generic1<any>
+
+type Gen1T<K extends Generic1Key, T> = Generic1<T>[K]
+
+interface Generic1<T> {
+    Maybe: Maybe<T>
+    Either: Either<unknown, T>
 }
 
-export class Maybe<T> implements Functor<T> {
+interface Functor<K extends Generic1Key, T> {
+    map<R>(f: (t: T) => R): Functor<K, R>
+}
+
+interface Bind<K extends Generic1Key, T> extends Functor<K, T> {
+    bind<T2>(f: (t: T) => Gen1T<K, T2>): Gen1T<K, T2>
+}
+
+namespace Monad {
+    export function join<K extends Generic1Key, T>(x: Bind<K, Gen1T<K, T>>): Gen1T<K, T> {
+        return x.bind<T>(y => y);
+    }
+}
+
+export class Maybe<T> implements Bind<'Maybe', T> {
     private readonly value: [] | [T];
 
     private constructor(...args: T[]) {
@@ -46,6 +69,10 @@ export class Maybe<T> implements Functor<T> {
         return this.maybe(Maybe.none(), x => Maybe.some(f(x)));
     }
 
+    bind<R>(f: (x: T) => Maybe<R>): Maybe<R> {
+        return this.maybe(Maybe.none(), f);
+    }
+
     static none<T>(): Maybe<T> {
         return new Maybe();
     }
@@ -63,11 +90,11 @@ export class Maybe<T> implements Functor<T> {
     }
 
     static join<T>(x: Maybe<Maybe<T>>): Maybe<T> {
-        return x.maybe(Maybe.none(), r => r);
+        return Monad.join<'Maybe', T>(x);
     }
 }
 
-export class Either<L, R> implements Functor<R> {
+export class Either<L, R> implements Bind<'Either', R> {
     private readonly leftValue: Maybe<L>;
     private readonly rightValue: Maybe<R>;
 
@@ -110,6 +137,10 @@ export class Either<L, R> implements Functor<R> {
         } else {
             return onRight(this.unwrapRight());
         }
+    }
+
+    bind<R2>(f: (r: R) => Either<L, R2>): Either<L, R2> {
+        return this.either(l => Either.left(l), r => f(r));
     }
 
     /**
