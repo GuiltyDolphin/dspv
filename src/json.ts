@@ -392,7 +392,7 @@ export class JsonParser {
      */
     parseAsOrThrow(text: string, cls: TySpec): any {
         return this.withSetupCleanUp(() => {
-            return parse(text).mapCollecting(v => this.loadAs(v, cls)).either(err => { throw err }, r => r);
+            return parse(text).mapCollecting(v => this.loadAs(v, cls)).orThrow();
         });
     }
 

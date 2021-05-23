@@ -140,6 +140,13 @@ export class Either<L, R> implements Functor<R> {
         return Either.right(this.unwrapRight());
     }
 
+    /**
+     * Throw a left branch, return a right branch.
+     */
+    orThrow(): R | never {
+        return this.either(l => { throw l }, r => r);
+    }
+
     static pure<L, R>(x: R): Either<L, R> {
         return Either.right(x);
     }
