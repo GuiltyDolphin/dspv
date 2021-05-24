@@ -2,10 +2,7 @@ export {
     assert,
     assertEquals,
     assertStringIncludes,
-    assertThrows
-} from "https://deno.land/std@0.95.0/testing/asserts.ts";
-
-export {
+    assertThrows,
     Test,
     testGroup,
-} from './testlib.ts';
+} from "https://deno.land/x/dentest@v0.1.0/mod.ts";
