@@ -3,6 +3,7 @@ import {
     assertEquals,
     assertStringIncludes,
     assertThrows,
+    Maybe,
     Test,
     testGroup,
 } from './deps.ts';
@@ -18,10 +19,6 @@ import {
     tuple,
     TySpec,
 } from '../mod.ts';
-
-import {
-    Maybe
-} from '../src/functional.ts';
 
 const basicParser = new JsonParser();
 

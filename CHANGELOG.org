@@ -9,6 +9,7 @@
 
 - dependencies
   - https://deno.land/x/dentest@v0.1.0
+  - https://deno.land/x/functionality@v0.1.0
 - =Enum= specifier
 - errors encountered when processing arrays now specify the
   failure index
@@ -16,12 +17,15 @@
 
 ** Changed
 
+- package now uses =functionality= package instead of internal
+  functional module
 - tests now use =dentest= instead of internal testing
   framework
 
 ** Removed
 
 - files
+  - =src/functional.ts=
   - =tests/testlib.ts=
 - support for aliases
   - =Schemas.addAlias= method

@@ -1,4 +1,4 @@
-import { Either, Maybe } from './functional.ts';
+import { Either, Maybe } from './deps.ts';
 
 type IsNot<S, T> = T extends S ? never : T
 

@@ -8,12 +8,9 @@ import {
 } from '../src/util.ts';
 
 import {
-    Maybe
-} from '../src/functional.ts';
-
-import {
     assertEquals,
     assertThrows,
+    Maybe,
     Test,
     testGroup,
 } from './deps.ts';
