@@ -8,5 +8,12 @@ export {
 } from "https://deno.land/x/dentest@v0.1.0/mod.ts";
 
 export {
+    array,
+    either,
+    maybe
+} from '../src/deps.ts';
+
+export type {
+    Either,
     Maybe
-} from 'https://deno.land/x/functionality@v0.1.0/mod.ts';
+} from '../src/deps.ts';

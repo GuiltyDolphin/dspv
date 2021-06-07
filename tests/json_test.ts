@@ -3,7 +3,7 @@ import {
     assertEquals,
     assertStringIncludes,
     assertThrows,
-    Maybe,
+    maybe,
     Test,
     testGroup,
 } from './deps.ts';
@@ -340,8 +340,11 @@ testGroup("parseAsOrThrow",
 
 function assertParseFailsWithClass(parser: JsonParser, toParse: string, spec: TySpec, expectedClass: any): any {
     const actual = parser.parseAs(toParse, spec);
-    assert(actual.isLeft(), "expected the parse to fail but it didn't");
-    assertEquals(actual.unwrapLeft().constructor, expectedClass);
+    if (actual.isLeft()) {
+        assertEquals(actual.unwrapLeft().constructor, expectedClass);
+    } else {
+        assert(false, "expected the parse to fail but it didn't");
+    }
     return actual;
 }
 
@@ -586,7 +589,7 @@ function testGetDescriptionOkay(desc: string, spec: TySpec, expected: string): T
 
 function testGetSchemaOkay(desc: string, spec: TySpec, expected: JsonSchema<any>): Test {
     return new Test(desc, () => {
-        assertEquals(errSchema.getSchemaForSpec(spec), Maybe.some(expected))
+        assertEquals(errSchema.getSchemaForSpec(spec), maybe.some(expected))
     });
 }
 

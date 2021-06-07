@@ -9,7 +9,7 @@
 
 - dependencies
   - https://deno.land/x/dentest@v0.1.0
-  - https://deno.land/x/functionality@v0.1.0
+  - https://deno.land/x/functionality@v0.2.1
 - =Enum= specifier
 - errors encountered when processing arrays now specify the
   failure index

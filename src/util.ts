@@ -1,57 +1,18 @@
-import { Either, Maybe } from './deps.ts';
+import {
+    array,
+    either,
+    Either,
+    maybe,
+    Maybe
+} from './deps.ts';
 
-type IsNot<S, T> = T extends S ? never : T
+import Nested = array.Nested;
+import SafeNested = array.SafeNested;
+import NonEmpty = array.NonEmpty
+import SafeNonEmptyNested = array.SafeNonEmptyNested;
+import isNonEmpty = array.isNonEmpty;
 
-type NotArray<T> = IsNot<Array<any>, T>
-
-/** A list whose elements may be arbitrarily nested. */
-export type Nested<T> = (T | Nested<T>)[]
-
-/**
- * A list whose elements may be arbitrarily nested.
- *
- * The type of elements cannot itself be a list.
- */
-export type SafeNested<T extends NotArray<any>> = Nested<T>
-
-/** A non-empty list. */
-export type NonEmptyFirstCanDiffer<F, T> = [F, ...T[]]
-export type NonEmpty<T> = NonEmptyFirstCanDiffer<T, T>
-
-function isNonEmptyArray<T>(x: T[]): x is NonEmpty<T> {
-    return x.length > 0;
-}
-
-/** A non-empty list whose elements may themselves be nested, non-empty lists. */
-export type NonEmptyNestedFirstCanDiffer<F, T> = [F | NonEmptyNestedFirstCanDiffer<F, T>, ...(T | NonEmptyNestedFirstCanDiffer<F, T>)[]]
-export type NonEmptyNested<T> = NonEmptyNestedFirstCanDiffer<T, T>
-
-/**
- * A non-empty list whose elements may themselves be nested, non-empty lists.
- *
- * The type of elements cannot itself be a list.
- */
-export type SafeNonEmptyNestedFirstCanDiffer<F extends NotArray<any>, T extends NotArray<any>> = NonEmptyNestedFirstCanDiffer<F, T>
-export type SafeNonEmptyNested<T> = SafeNonEmptyNestedFirstCanDiffer<T, T>
-
-function _flatten<T>(arr: SafeNested<T>, result: T[]): void {
-    for (let i = 0; i < arr.length; i++) {
-        const value = arr[i];
-        Array.isArray(value) ? _flatten(value, result) : result.push(value);
-    }
-};
-
-/** Flatten a list of nested lists into a single flat list. */
-export function flatten<T>(arr: SafeNested<T>): T[] {
-    const res: T[] = [];
-    _flatten(arr, res);
-    return res;
-};
-
-/** Flatten a list of non-empty, nested lists into a single flat non-empty list. */
-export function flattenNonEmpty<F, T>(xs: SafeNonEmptyNestedFirstCanDiffer<F, T>): NonEmptyFirstCanDiffer<F, T> {
-    return flatten(xs) as NonEmptyFirstCanDiffer<F, T>;
-}
+export type SafeArray<T> = array.WhenNotArray<T, T[]>;
 
 /** Essentially an AST for a list (without element values). */
 type listAction = ["openParen", number] | "elem" | ["closeParen", number]
@@ -66,7 +27,7 @@ function nestedActions<T>(xs: SafeNested<T>, paren: number = 0): listAction[] {
         const curr = xs[i];
         if (curr instanceof Array) {
             res.push(["openParen", paren]);
-            res.push(...nestedActions(curr, paren + 1));
+            res.push(...nestedActions(curr as SafeNested<T>, paren + 1));
             res.push(["closeParen", paren]);
         } else {
             res.push("elem");
@@ -93,7 +54,7 @@ function groupingFromStartAsBestYouCan<T>(actions: (listAction | 'skip')[], xs: 
             const closingIndex = actionsRest.findIndex(c => c[0] === 'closeParen' && c[1] === action[1]);
             const actionsInner = actionsRest.splice(0, closingIndex);
             const xsInner = xsRest.splice(0, actionsInner.filter(c => c === 'elem' || c === 'skip').length);
-            res.push(groupingFromStartAsBestYouCan(actionsInner, xsInner));
+            res.push(groupingFromStartAsBestYouCan(actionsInner, xsInner as SafeArray<T>));
         } else if (action[0] === 'closeParen') {
             // already handled by recursion
             continue;
@@ -108,11 +69,11 @@ function killEmpties<T>(xs: SafeNested<T>): (T | SafeNonEmptyNested<T>)[] {
     }
     const res: (T | SafeNonEmptyNested<T>)[] = new Array();
     for (let i = 0; i < xs.length; i++) {
-        const e = xs[i];
+        const e = xs[i] as T | SafeNested<T>;
         if (e instanceof Array) {
             const inner = killEmpties(e);
-            if (isNonEmptyArray(inner)) {
-                res.push(inner);
+            if (isNonEmpty(inner)) {
+                res.push(inner as SafeNonEmptyNested<T>);
             }
         } else {
             res.push(e);
@@ -142,7 +103,7 @@ function skipFirstN(actions: listAction[], n: number): (listAction | 'skip')[] {
  *
  * Postcondition: <pre><code>flatten(groupedVersion) = flatten(groupingStartAndEnd(groupedVersion, X, Y))</code></pre>
  */
-export function groupingStartAndEnd<T extends NotArray<any>>(groupedVersion: SafeNested<T>, prefix: T[], suffix: T[]): [Nested<T>, Nested<T>] {
+export function groupingStartAndEnd<T>(groupedVersion: SafeNested<T>, prefix: SafeArray<T>, suffix: T[]): [Nested<T>, Nested<T>] {
     const actions = nestedActions(groupedVersion);
     if (prefix.length + suffix.length !== actions.filter(c => c === 'elem').length) {
         throw new TypeError('number of elements in prefix + suffix is not the same as the number of grouped elements');
@@ -150,22 +111,22 @@ export function groupingStartAndEnd<T extends NotArray<any>>(groupedVersion: Saf
     const skipLen = actions.filter(m => m === 'elem').length - suffix.length;
     const withSkips: (undefined | T)[] = [...Array(skipLen), ...suffix];
     const prefixGrouped = groupingFromStartAsBestYouCan(actions, prefix);
-    const suffixGrouped = killEmpties(groupingFromStartAsBestYouCan(skipFirstN(actions, skipLen), withSkips) as Nested<T>);
+    const suffixGrouped = killEmpties(groupingFromStartAsBestYouCan(skipFirstN(actions, skipLen), withSkips) as SafeNested<T>);
     return [prefixGrouped, suffixGrouped]
 }
 
 type AtLeastOneOf<T1, T2> = Either<T1, Either<T2, [T1, T2]>>;
 
 function atLeastOneOfFirst<T1, T2>(x: T1): AtLeastOneOf<T1, T2> {
-    return Either.left(x);
+    return either.left(x);
 }
 
 function atLeastOneOfSecond<T1, T2>(x: T2): AtLeastOneOf<T1, T2> {
-    return Either.right(Either.left(x));
+    return either.right(either.left(x));
 }
 
 function atLeastOneOfBoth<T1, T2>(x1: T1, x2: T2): AtLeastOneOf<T1, T2> {
-    return Either.right(Either.right([x1, x2]));
+    return either.right(either.right([x1, x2]));
 }
 
 type NestMapMap<K, V> = Map<K, AtLeastOneOf<V, NestMap<K, V>>>;
@@ -214,7 +175,7 @@ export class NestMap<K, V> {
 
     private getHere(k: K): Maybe<AtLeastOneOf<V, NestMap<K, V>>> {
         const res = this.map.get(k);
-        return res === undefined ? Maybe.none() : Maybe.some(res);
+        return res === undefined ? maybe.none() : maybe.some(res);
     }
 
     private getHereOrCreate(k: K): NestMap<K, V> {
@@ -232,7 +193,7 @@ export class NestMap<K, V> {
     }
 
     private setThere([k, ...ks]: NonEmpty<K>, v: V): NestMap<K, V> {
-        if (isNonEmptyArray(ks)) {
+        if (isNonEmpty(ks)) {
             this.getHereOrCreate(k).setThere(ks, v);
         } else {
             this.setHere(k, v);
@@ -241,12 +202,12 @@ export class NestMap<K, V> {
     }
 
     get([k, ...ks]: NonEmpty<K>): Maybe<V> {
-        return this.getHere(k).maybe(Maybe.none(),
+        return this.getHere(k).maybe(maybe.none(),
             v => {
-                if (isNonEmptyArray(ks)) {
-                    return v.either(_ => Maybe.none(), r => r.either(l => l.get(ks), r => r[1].get(ks)));
+                if (isNonEmpty(ks)) {
+                    return v.either(_ => maybe.none(), r => r.either(l => l.get(ks), r => r[1].get(ks)));
                 } else {
-                    return v.either(l => Maybe.some(l), r => r.either(_ => Maybe.none(), r => Maybe.some(r[0])));
+                    return v.either(l => maybe.some(l), r => r.either(_ => maybe.none(), r => maybe.some(r[0])));
                 }
             });
     }
@@ -257,12 +218,12 @@ export class NestMap<K, V> {
      * path.
      */
     getBestAndRest([k, ...ks]: NonEmpty<K>): Maybe<[V, K[]]> {
-        return Maybe.join(this.getHere(k).map(lr => lr.either(l => Maybe.some([l, ks]), r => {
-            if (isNonEmptyArray(ks)) {
+        return this.getHere(k).bind(lr => lr.either(l => maybe.some([l, ks]), r => {
+            if (isNonEmpty(ks)) {
                 return r.either(l => l.getBestAndRest(ks), r => r[1].getBestAndRest(ks));
             }
-            return r.either(_ => Maybe.none(), rr => Maybe.some([rr[0], []]));
-        })));
+            return r.either(_ => maybe.none(), rr => maybe.some([rr[0], []]));
+        }));
     }
 
     /**

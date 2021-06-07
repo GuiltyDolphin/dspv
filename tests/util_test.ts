@@ -1,23 +1,26 @@
 import {
-    flatten,
     groupingStartAndEnd,
-    Nested,
     NestMap,
-    NonEmpty,
-    SafeNested,
+    SafeArray,
 } from '../src/util.ts';
 
 import {
+    array,
     assertEquals,
     assertThrows,
+    maybe,
     Maybe,
     Test,
     testGroup,
 } from './deps.ts';
 
+import Nested = array.Nested;
+import NonEmpty = array.NonEmpty;
+import SafeNested = array.SafeNested;
+
 function testSetAndGetWithMap<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, value: V): Test {
     return new Test(description, () => {
-        assertEquals(map.set(path, value).get(path), Maybe.some(value));
+        assertEquals(map.set(path, value).get(path), maybe.some(value));
     });
 }
 
@@ -32,11 +35,11 @@ function testGetBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmp
 }
 
 function testGet<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: V): Test {
-    return testGetBase(description, map, path, Maybe.some(expected));
+    return testGetBase(description, map, path, maybe.some(expected));
 }
 
 function testGetNotThere<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>): Test {
-    return testGetBase(description, map, path, Maybe.none());
+    return testGetBase(description, map, path, maybe.none());
 }
 
 function testGetBestAndRestWithPathBase<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: Maybe<[NonEmpty<K>, V, K[]]>): Test {
@@ -52,18 +55,18 @@ function testGetBestAndRestBase<K, V>(description: string, map: NestMap<K, V>, p
 }
 
 function testGetBestAndRestWithPath<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: [NonEmpty<K>, V, K[]]): Test {
-    return testGetBestAndRestWithPathBase(description, map, path, Maybe.some(expected));
+    return testGetBestAndRestWithPathBase(description, map, path, maybe.some(expected));
 }
 
 function testGetBestAndRest<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>, expected: [V, K[]]): Test {
-    return testGetBestAndRestBase(description, map, path, Maybe.some(expected));
+    return testGetBestAndRestBase(description, map, path, maybe.some(expected));
 }
 
 function testGetBestAndRestNotThere<K, V>(description: string, map: NestMap<K, V>, path: NonEmpty<K>): Test {
-    return testGetBestAndRestBase(description, map, path, Maybe.none());
+    return testGetBestAndRestBase(description, map, path, maybe.none());
 }
 
-function testSplitBasedOnGrouping<T>(description: string, grouped: SafeNested<T>, prefix: T[], suffix: T[], expectedPrefix: Nested<T>, expectedSuffix: Nested<T>): Test {
+function testSplitBasedOnGrouping<T>(description: string, grouped: SafeNested<T>, prefix: SafeArray<T>, suffix: T[], expectedPrefix: Nested<T>, expectedSuffix: Nested<T>): Test {
     return new Test(description, () => {
         const [actualPrefix, actualSuffix] = groupingStartAndEnd(grouped, prefix, suffix);
         assertEquals(actualPrefix, expectedPrefix);
@@ -71,15 +74,9 @@ function testSplitBasedOnGrouping<T>(description: string, grouped: SafeNested<T>
     });
 }
 
-function testSplitBasedOnGroupingFails<T>(description: string, grouped: SafeNested<T>, prefix: T[], suffix: T[]): Test {
+function testSplitBasedOnGroupingFails<T>(description: string, grouped: SafeNested<T>, prefix: SafeArray<T>, suffix: T[]): Test {
     return new Test(description, () => {
         assertThrows(() => groupingStartAndEnd(grouped, prefix, suffix), TypeError);
-    });
-}
-
-function testFlatten<T>(description: string, unflattened: Nested<T>, expected: T[]): Test {
-    return new Test(description, () => {
-        assertEquals(flatten(unflattened), expected);
     });
 }
 
@@ -91,14 +88,6 @@ m0.set(["k1"], 1);
 m1.set(["k1"], 1);
 m1.set(["k1", "k2"], 2);
 m2.set(["k1", "k2"], 2);
-
-testGroup('flatten',
-    testFlatten("[]", [], []),
-    testFlatten("[1234]", [1, 2, 3, 4], [1, 2, 3, 4]),
-    testFlatten("[1,[2,[3,[4]]]]", [1, [2, [3, [4]]]], [1, 2, 3, 4]),
-    testFlatten("[[[[1],2],3,],4]", [[[[1], 2], 3], 4], [1, 2, 3, 4]),
-    testFlatten("[[1], [[[[2], [3]]]], 4]", [[1], [[[[2], [3]]]], 4], [1, 2, 3, 4]),
-).runAsMain();
 
 testGroup("list grouping",
     testGroup("with key grouping",

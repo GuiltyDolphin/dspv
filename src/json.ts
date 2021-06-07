@@ -1,11 +1,14 @@
-import { Either, Maybe } from './deps.ts';
+import {
+    array,
+    either,
+    Either,
+    maybe,
+    Maybe
+} from './deps.ts';
 
 import {
-    flattenNonEmpty,
     groupingStartAndEnd,
     NestMap,
-    NonEmptyFirstCanDiffer,
-    NonEmptyNestedFirstCanDiffer,
 } from './util.ts';
 
 type GenJsonType<T> = {
@@ -158,10 +161,10 @@ function toJsonValue(x: JsonValueRaw): JsonValue {
 
 function parseJSON(text: string): Either<SyntaxError, JsonValueRaw> {
     try {
-        return Either.right(JSON.parse(text));
+        return either.right(JSON.parse(text));
     } catch (e) {
         if (e instanceof SyntaxError) {
-            return Either.left(e);
+            return either.left(e);
         }
         throw e;
     }
@@ -176,9 +179,9 @@ class ParseContext {
 
     private constructor(parent?: ParseContext) {
         if (parent === undefined) {
-            this.parentContext = Maybe.none();
+            this.parentContext = maybe.none();
         } else {
-            this.parentContext = Maybe.some(parent);
+            this.parentContext = maybe.some(parent);
         }
     }
 
@@ -278,11 +281,11 @@ export class JsonParser {
     constructor(schemas?: Schemas, noDefault?: boolean) {
         schemas = Schemas.mergeSchemas(noDefault ? Schemas.emptySchemas() : defaultSchema(), schemas !== undefined ? schemas : Schemas.emptySchemas());
         this.schemas = schemas;
-        this.context = Maybe.none();
+        this.context = maybe.none();
     }
 
     private updateContext(f: (c: ParseContext) => ParseContext) {
-        this.context = Maybe.some(f(this.checkParsingOrFail()));
+        this.context = maybe.some(f(this.checkParsingOrFail()));
     }
 
     private tryingToLoadValueForSpec(spec: TySpec, value: JsonValue) {
@@ -302,7 +305,7 @@ export class JsonParser {
     }
 
     private contextPop() {
-        this.context = Maybe.join(this.context.map(c => c.getParentContext()));
+        this.context = this.context.bind(c => c.getParentContext());
     }
 
     /**
@@ -365,11 +368,11 @@ export class JsonParser {
     }
 
     private initialiseForParsing() {
-        this.context = Maybe.some(ParseContext.topLevelContext());
+        this.context = maybe.some(ParseContext.topLevelContext());
     }
 
     private cleanupAfterParsing() {
-        this.context = Maybe.none();
+        this.context = maybe.none();
     }
 
     private withSetupCleanUp<T>(f: () => T): T {
@@ -404,11 +407,11 @@ export class JsonParser {
     }
 
     static failParse<T>(err: JsonParseError): JsonParseResult<T> {
-        return Either.fail(err);
+        return either.fail(err);
     }
 
     static parseOk<T>(x: T): JsonParseResult<T> {
-        return Either.pure(x);
+        return either.pure(x);
     }
 }
 
@@ -661,15 +664,15 @@ type SchemaBuilder = SFun<JsonSchema<any>>;
 
 type DescriptionFn = SFun<string>;
 
-function tySpecAsGroupedBase(x: TySpec): NonEmptyNestedFirstCanDiffer<TySpecBase, TySpecArgBase> {
+function tySpecAsGroupedBase(x: TySpec): array.NonEmptyNested<TySpecArgBase, TySpecBase> {
     if (x instanceof Array) {
         return x;
     }
     return [x];
 }
 
-function flattenTySpec(x: TySpec): NonEmptyFirstCanDiffer<TySpecBase, TySpecArgBase> {
-    return flattenNonEmpty(tySpecAsGroupedBase(x));
+function flattenTySpec(x: TySpec): array.NonEmpty<TySpecArgBase, TySpecBase> {
+    return array.flatten(tySpecAsGroupedBase(x));
 }
 
 function hasRestParameter(f: (...args: any[]) => any): boolean {
@@ -697,8 +700,8 @@ class Spec<K extends 'specs' | 'mixed', T> {
         build?: SFun<JsonSchema<T>>[K]
     }) {
         this.accepts = opts.accepts;
-        this.description = opts.description === undefined ? Maybe.none() : Maybe.some(opts.description);
-        this.builder = opts.build === undefined ? Maybe.none() : Maybe.some(opts.build);
+        this.description = opts.description === undefined ? maybe.none() : maybe.some(opts.description);
+        this.builder = opts.build === undefined ? maybe.none() : maybe.some(opts.build);
     }
 
     getBuilder(): Maybe<[K, SFun<JsonSchema<T>>[K]]> {
@@ -794,7 +797,7 @@ export class Schemas {
     }
 
     private mostSpecificSchema(spec: TySpec): Maybe<[TySpec, [keyof SchemaBuilder, SchemaBuilder[keyof SchemaBuilder]], TySpec[]]> {
-        return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getBuilder().map(b => [c[0], b, c[2]])));
+        return this.mostSpecificSpec(spec).bind(c => c[1].getBuilder().map(b => [c[0], b, c[2]]));
     }
 
     /** Get the schema associated with the given specification, if any. */
@@ -823,7 +826,7 @@ export class Schemas {
     }
 
     private mostSpecificDescription(spec: TySpec): Maybe<[TySpec, [keyof DescriptionFn, DescriptionFn[keyof DescriptionFn]], TySpec[]]> {
-        return Maybe.join(this.mostSpecificSpec(spec).map(c => c[1].getDescriptionFn().map(d => [c[0], d, c[2]])));
+        return this.mostSpecificSpec(spec).bind(c => c[1].getDescriptionFn().map(d => [c[0], d, c[2]]));
     }
 
     static _getDescriptionBase(spec: TySpecArg): string {
@@ -984,7 +987,7 @@ function defaultSchema(): Schemas {
                             res[i] = loaded.unwrapRight();
                         }
                     }
-                    return Either.right(res);
+                    return either.right(res);
                 }
             })
         })
