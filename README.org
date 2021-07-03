@@ -61,7 +61,7 @@ by creating a parser and running as follows:
 #+BEGIN_SRC typescript
   const parser = new JsonParser(schemas);
 
-  console.log(parser.parseAsOrThrow('{"age": 20, "address": "somewhere on Earth"}'));
+  console.log(parser.parseAsOrThrow('{"age": 20, "address": "somewhere on Earth"}', Person));
   // Person { age: 20, address: "somewhere on Earth" }
 #+END_SRC
 
